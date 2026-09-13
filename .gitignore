@@ -23,6 +23,12 @@ uploads/*
 !uploads/.gitkeep
 chroma_db/
 *.log
+.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
 
 # OS
 .DS_Store
