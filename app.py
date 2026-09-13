@@ -1,13 +1,18 @@
 # app.py
 
+import json
+import os
 
-from flask import Flask, request, jsonify
+import ollama
+from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-import os
+
 from rag_engine import RAGEngine
 
-app = Flask(__name__)
+FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path="")
 CORS(app)
 
 UPLOAD_FOLDER = './uploads'
@@ -19,168 +24,171 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB max file size
 
 rag = RAGEngine()
 
-@app.route('/')
-def index():
-    """Serve the frontend"""
-    with open('index.html', 'r', encoding='utf-8') as f:
-        return f.read()
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-@app.route('/health', methods=['GET'])
-def health():
-    """Health check endpoint"""
-    return jsonify({"status": "ok", "message": "RAG API is running"}), 200
 
-@app.route('/upload', methods=['POST'])
+def ndjson_stream(events):
+    """Turn an iterable of (type, payload) tuples into a newline-delimited
+    JSON stream the frontend can read incrementally."""
+    def generate():
+        for event_type, payload in events:
+            yield json.dumps({"type": event_type, "data": payload}) + "\n"
+        yield json.dumps({"type": "done", "data": None}) + "\n"
+    return Response(generate(), mimetype="application/x-ndjson")
+
+
+# ---------------------------------------------------------------- API ----
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    """Health check: reports API status, Ollama reachability, and doc count."""
+    ollama_ok = True
+    try:
+        ollama.list()
+    except Exception:
+        ollama_ok = False
+
+    try:
+        stats = rag.get_stats()
+    except Exception:
+        stats = {"total_chunks": 0, "total_documents": 0}
+
+    return jsonify({
+        "status": "ok",
+        "ollama_connected": ollama_ok,
+        **stats,
+    }), 200
+
+
+@app.route('/api/upload', methods=['POST'])
 def upload_files():
-    """Upload and process documents"""
-    # DEBUG: Print what we received
-    print("\n=== DEBUG INFO ===")
-    print(f"Content-Type: {request.content_type}")
-    print(f"request.files keys: {list(request.files.keys())}")
-    print(f"request.form keys: {list(request.form.keys())}")
-    print(f"request.data: {request.data[:100] if request.data else 'None'}")
-    print("==================\n")
-    
-    # Try to get files with different key names
-    files = None
-    if 'files' in request.files:
-        files = request.files.getlist('files')
-        print(f"Found 'files' key with {len(files)} files")
-    elif 'files[]' in request.files:
-        files = request.files.getlist('files[]')
-        print(f"Found 'files[]' key with {len(files)} files")
-    else:
+    """Upload and process documents."""
+    files = request.files.getlist('files') or request.files.getlist('files[]')
+
+    if not files:
         available_keys = list(request.files.keys())
-        print(f"Available keys in request.files: {available_keys}")
-        
         if available_keys:
-            # Use the first available key
-            first_key = available_keys[0]
-            files = request.files.getlist(first_key)
-            print(f"Using key '{first_key}' with {len(files)} files")
-        else:
-            return jsonify({
-                "error": "No files provided",
-                "debug_info": {
-                    "content_type": request.content_type,
-                    "available_keys": available_keys,
-                    "form_keys": list(request.form.keys())
-                }
-            }), 400
-    
+            files = request.files.getlist(available_keys[0])
+
     if not files or files[0].filename == '':
         return jsonify({"error": "No files selected"}), 400
-    
+
     results = []
-    
     for file in files:
-        print(f"Processing file: {file.filename}")
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            try:
-                chunks = rag.add_document(filepath, filename)
-                results.append({
-                    "filename": filename,
-                    "status": "success",
-                    "chunks_created": chunks
-                })
-                print(f"✅ Success: {filename} - {chunks} chunks")
-            except Exception as e:
-                results.append({
-                    "filename": filename,
-                    "status": "failed",
-                    "error": str(e)
-                })
-                print(f"❌ Error: {filename} - {str(e)}")
-        else:
+        if not file or not allowed_file(file.filename):
             results.append({
                 "filename": file.filename if file else "unknown",
                 "status": "failed",
-                "error": "Invalid file type"
+                "error": "Invalid file type. Allowed: pdf, docx, txt",
             })
-            print(f"❌ Invalid file type: {file.filename if file else 'unknown'}")
-    
+            continue
+
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
+
+        try:
+            chunks = rag.add_document(filepath, filename)
+            results.append({
+                "filename": filename,
+                "status": "success",
+                "chunks_created": chunks,
+            })
+        except Exception as e:
+            results.append({
+                "filename": filename,
+                "status": "failed",
+                "error": str(e),
+            })
+
     return jsonify({"results": results}), 200
 
-@app.route('/query', methods=['POST'])
+
+@app.route('/api/documents', methods=['GET'])
+def list_documents():
+    """List every uploaded document with its chunk count."""
+    try:
+        return jsonify({"documents": rag.list_documents()}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/documents/<path:filename>', methods=['DELETE'])
+def delete_document(filename):
+    """Delete a single document (and all its chunks)."""
+    try:
+        found = rag.delete_document(filename)
+        if not found:
+            return jsonify({"error": f"'{filename}' not found"}), 404
+        return jsonify({"message": f"Deleted '{filename}'"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/query', methods=['POST'])
 def query():
-    """Query the document database"""
-    data = request.get_json()
-    
-    if not data or 'question' not in data:
+    """Ask a question, streamed as newline-delimited JSON."""
+    data = request.get_json(silent=True) or {}
+    question = data.get('question')
+
+    if not question:
         return jsonify({"error": "No question provided"}), 400
-    
-    question = data['question']
+
     n_results = data.get('n_results', 5)
-    
-    try:
-        answer, sources = rag.query(question, n_results)
-        
-        if answer is None:
-            return jsonify({
-                "error": "No documents found. Please upload documents first."
-            }), 404
-        
-        return jsonify({
-            "question": question,
-            "answer": answer,
-            "sources": sources
-        }), 200
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    return ndjson_stream(rag.query_stream(question, n_results))
 
-@app.route('/summarize', methods=['POST'])
+
+@app.route('/api/summarize', methods=['POST'])
 def summarize():
-    """Generate summary of documents"""
-    data = request.get_json() or {}
-    filename = data.get('filename', None)
-    
-    try:
-        summary = rag.summarize(filename)
-        return jsonify({
-            "summary": summary,
-            "filename": filename if filename else "all documents"
-        }), 200
-    
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    """Summarize one document (or all documents), streamed as NDJSON."""
+    data = request.get_json(silent=True) or {}
+    filename = data.get('filename')
+    return ndjson_stream(rag.summarize_stream(filename))
 
-@app.route('/stats', methods=['GET'])
-def stats():
-    """Get database statistics"""
-    try:
-        stats = rag.get_stats()
-        return jsonify(stats), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
-@app.route('/clear', methods=['DELETE'])
+@app.route('/api/clear', methods=['DELETE'])
 def clear():
-    """Clear all documents from database"""
+    """Clear all documents from the database."""
     try:
-        rag.collection.delete()
+        rag.clear_all()
         return jsonify({"message": "All documents cleared"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+# ------------------------------------------------- serve the React app ----
+
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def serve_frontend(path):
+    """Serve the built React app if it exists; otherwise point to dev mode."""
+    if path and os.path.exists(os.path.join(FRONTEND_DIST, path)):
+        return send_from_directory(FRONTEND_DIST, path)
+
+    index_path = os.path.join(FRONTEND_DIST, 'index.html')
+    if os.path.exists(index_path):
+        return send_from_directory(FRONTEND_DIST, 'index.html')
+
+    return jsonify({
+        "message": "Frontend not built. Run `npm run build` inside frontend/, "
+                   "or use `npm run dev` in frontend/ during development.",
+        "api_base": "/api",
+    }), 200
+
+
 if __name__ == '__main__':
-    print("🚀 RAG Document Summarizer API Starting...")
-    print("📚 Endpoints available:")
-    print("  - GET  /health       : Health check")
-    print("  - POST /upload       : Upload documents")
-    print("  - POST /query        : Ask questions")
-    print("  - POST /summarize    : Get summary")
-    print("  - GET  /stats        : Database stats")
-    print("  - DELETE /clear      : Clear database")
-    print("\n✅ Server running on http://localhost:5000")
-    
-    # app.run(host='0.0.0.0', port=5000, debug=True)
+    print("RAG Document Summarizer API starting...")
+    print("Endpoints:")
+    print("  GET    /api/health")
+    print("  POST   /api/upload")
+    print("  GET    /api/documents")
+    print("  DELETE /api/documents/<filename>")
+    print("  POST   /api/query        (streamed NDJSON)")
+    print("  POST   /api/summarize    (streamed NDJSON)")
+    print("  DELETE /api/clear")
+    print("Server running on http://localhost:5000")
+
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)
