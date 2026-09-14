@@ -4,6 +4,12 @@ import json
 import os
 from functools import wraps
 
+from dotenv import load_dotenv
+
+# Must run before importing llm_provider -- it reads its provider/API-key
+# env vars at import time, so .env has to already be loaded by then.
+load_dotenv()
+
 from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 from flask_limiter import Limiter
