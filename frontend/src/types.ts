@@ -29,11 +29,13 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   sources?: Source[]
+  status?: string
   isStreaming?: boolean
   error?: string
 }
 
 export type NdjsonEvent =
+  | { type: 'status'; data: string }
   | { type: 'sources'; data: Source[] }
   | { type: 'token'; data: string }
   | { type: 'error'; data: string }

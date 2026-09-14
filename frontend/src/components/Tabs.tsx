@@ -15,15 +15,15 @@ export default function Tabs({
   ]
 
   return (
-    <div className="flex gap-1 border-b border-zinc-800 px-4">
+    <div className="flex gap-1 border-b border-zinc-200 bg-white px-4 dark:border-zinc-800 dark:bg-zinc-950">
       {items.map(({ id, label, icon: Icon }) => (
         <button
           key={id}
           onClick={() => onChange(id)}
           className={`flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium transition-colors ${
             active === id
-              ? 'border-indigo-500 text-zinc-100'
-              : 'border-transparent text-zinc-500 hover:text-zinc-300'
+              ? 'border-indigo-500 text-zinc-900 dark:text-zinc-100'
+              : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:text-zinc-500 dark:hover:text-zinc-300'
           }`}
         >
           <Icon className="h-4 w-4" />

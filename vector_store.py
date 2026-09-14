@@ -41,7 +41,14 @@ class VectorStore:
     def _matches(metadata, where):
         if not where:
             return True
-        return all(metadata.get(k) == v for k, v in where.items())
+        for key, condition in where.items():
+            value = metadata.get(key)
+            if isinstance(condition, dict) and "$in" in condition:
+                if value not in condition["$in"]:
+                    return False
+            elif value != condition:
+                return False
+        return True
 
     def upsert(self, ids, embeddings, documents, metadatas):
         for id_, embedding, document, metadata in zip(ids, embeddings, documents, metadatas):
@@ -52,12 +59,14 @@ class VectorStore:
             }
         self._save()
 
-    def query(self, query_embeddings, n_results=5, include=None):
+    def query(self, query_embeddings, n_results=5, include=None, where=None):
         query_vec = np.asarray(query_embeddings[0], dtype=np.float32)
         query_norm = np.linalg.norm(query_vec)
 
         scored = []
         for record in self._records.values():
+            if not self._matches(record["metadata"], where):
+                continue
             emb = record["embedding"]
             denom = query_norm * np.linalg.norm(emb)
             similarity = float(np.dot(query_vec, emb) / denom) if denom else 0.0
