@@ -96,14 +96,16 @@ Routes marked 🔒 require an `X-App-Secret` header when `APP_SECRET` is set (se
 | POST | `/api/summarize` 🔒 | `{ "filename": "..." \| null }` — streamed NDJSON summary |
 | DELETE | `/api/clear` 🔒 | Delete every document |
 
-## Docker
+## Docker (local, Ollama-only path)
 
 ```bash
-docker build -t rag-document-summarizer .
+docker build -f Dockerfile.ollama-local -t rag-document-summarizer .
 docker run -p 5000:5000 rag-document-summarizer
 ```
 
 The image is a multi-stage build: the React app is built in a Node stage, then copied into the Python/Ollama runtime image, which serves both the API and the built frontend from a single container.
+
+Deliberately *not* named `Dockerfile` — Render (and several other PaaS platforms) auto-detect a file with that exact name and default to a Docker-based deploy over their native Python buildpack, which would install and try to start Ollama on a free-tier host with no room for it. Renaming it avoids that trap entirely for the Render deployment below, which uses the native Python runtime instead.
 
 ## Notes on the design
 
@@ -165,7 +167,7 @@ For a hard ceiling beyond both of these, set a budget alert (or a hard cap) on b
 
 Render's free tier spins the backend down after ~15 minutes idle; the next request pays a 30-60s cold-start cost. Not a hard usage cap, just worth hitting the health endpoint once before a live demo to warm it up.
 
-Docker build (for the local-Ollama, single-container path) is written but not verified in this environment — no Docker available where this was built. Test `docker build` before relying on it if you go that route instead.
+`Dockerfile.ollama-local` (for the local-Ollama, single-container path) is written but not verified in this environment — no Docker available where this was built. Test `docker build -f Dockerfile.ollama-local .` before relying on it if you go that route instead.
 
 ## Possible next steps
 
