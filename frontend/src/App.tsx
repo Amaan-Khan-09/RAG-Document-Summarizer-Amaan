@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Menu, Sparkles } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import Sidebar from './components/Sidebar'
 import Tabs, { type Tab } from './components/Tabs'
@@ -7,12 +7,23 @@ import ChatView from './components/ChatView'
 import SummarizeView from './components/SummarizeView'
 import GradientBackdrop from './components/GradientBackdrop'
 import EmptyState from './components/EmptyState'
+import IntroLoader from './components/IntroLoader'
+import Logo from './components/Logo'
 import { useTheme } from './hooks/useTheme'
 import { useIsMobile } from './hooks/useIsMobile'
 import { getDocuments, getHealth } from './lib/api'
 import type { DocumentInfo, HealthStatus } from './types'
 
 const HEALTH_POLL_MS = 15_000
+const INTRO_KEY = 'rag-summarizer-intro-shown'
+
+function getIntroAlreadyShown() {
+  try {
+    return sessionStorage.getItem(INTRO_KEY) === '1'
+  } catch {
+    return false
+  }
+}
 
 function App() {
   const { theme, toggleTheme } = useTheme()
@@ -20,6 +31,7 @@ function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [ready, setReady] = useState(false)
+  const [showIntro, setShowIntro] = useState(() => !getIntroAlreadyShown())
   const [excludedFilenames, setExcludedFilenames] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<Tab>('chat')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -56,9 +68,20 @@ function App() {
 
   const hasDocuments = documents.length > 0
 
+  function handleIntroDone() {
+    try {
+      sessionStorage.setItem(INTRO_KEY, '1')
+    } catch {
+      // ignore -- intro just replays next load, harmless
+    }
+    setShowIntro(false)
+  }
+
   return (
     <div className="relative flex h-screen overflow-hidden text-zinc-900 dark:text-zinc-100">
       <GradientBackdrop />
+
+      <AnimatePresence>{showIntro && <IntroLoader onDone={handleIntroDone} />}</AnimatePresence>
 
       <AnimatePresence mode="wait">
         {!ready ? (
@@ -104,9 +127,7 @@ function App() {
                 >
                   <Menu className="h-5 w-5" />
                 </button>
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500">
-                  <Sparkles className="h-3 w-3 text-white" />
-                </div>
+                <Logo size="sm" />
                 <span className="text-sm font-semibold">RAG Summarizer</span>
               </div>
 

@@ -1,8 +1,8 @@
-import { Sparkles } from 'lucide-react'
 import { motion } from 'framer-motion'
 import UploadDropzone from './UploadDropzone'
 import ThemeToggle from './ThemeToggle'
 import StatusBadge from './StatusBadge'
+import Logo from './Logo'
 import type { Theme } from '../hooks/useTheme'
 import type { HealthStatus } from '../types'
 
@@ -29,9 +29,8 @@ export default function EmptyState({
           initial={{ scale: 0.8, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-          className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-lg shadow-violet-500/25"
         >
-          <Sparkles className="h-7 w-7 text-white" />
+          <Logo size="xl" />
         </motion.div>
 
         <motion.div
