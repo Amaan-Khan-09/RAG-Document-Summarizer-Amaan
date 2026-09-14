@@ -1,10 +1,12 @@
 # RAG Document Summarizer
 
-An AI-powered document Q&A and summarization tool built on Retrieval-Augmented Generation. Upload PDFs, DOCX, or text files, then ask questions grounded in their actual content (with source citations) or generate a bullet-point summary — all running locally, no API key required.
+An AI-powered document Q&A and summarization tool built on Retrieval-Augmented Generation. Upload PDFs, DOCX, or text files, then ask questions grounded in their actual content (with source citations) or generate a bullet-point summary.
+
+Runs two ways, switched by one environment variable: **fully local via Ollama** for development (no API key, no cost), or on **Google Gemini** for the deployed version (since the deployed host has no GPU/RAM budget to run models itself).
 
 ## Tech Stack
 
-**Backend:** Python, Flask, ChromaDB (vector store), Ollama (`llama3.2` for generation, `nomic-embed-text` for embeddings)
+**Backend:** Python, Flask, ChromaDB (vector store), a swappable LLM provider layer — Ollama (`llama3.2` + `nomic-embed-text`) locally, Gemini (`gemini-2.5-flash` + `gemini-embedding-001`) in production
 **Frontend:** React, TypeScript, Tailwind CSS v4, Vite
 
 ## Features
@@ -14,20 +16,28 @@ An AI-powered document Q&A and summarization tool built on Retrieval-Augmented G
 - Citations that show the actual retrieved snippet and similarity score on click — not just a filename claiming relevance, but the evidence itself
 - Per-document or all-documents summarization, also streamed live, with one-click copy
 - A document library showing every indexed file and its chunk count, with per-file delete and a clear-all action
-- A live status indicator for whether the app can actually reach Ollama, not just whether the API process is up
+- A live status indicator for whether the app can actually reach the active LLM provider, not just whether the API process is up
+- Rate limiting and a shared-secret gate on every API-cost-incurring route, so a public deployment can't be hit directly (bypassing the frontend) to burn through the API key's quota
 
 ## Running it locally
 
 ### 1. Prerequisites
 
-Install [Ollama](https://ollama.com/download) and pull the two models this app uses:
+By default the app uses local Ollama — install it and pull the two models this app uses:
 
 ```bash
 ollama pull llama3.2
 ollama pull nomic-embed-text
 ```
 
-Leave `ollama serve` running (most installs run it automatically in the background).
+Leave `ollama serve` running (most installs run it automatically in the background). No API key needed for local dev.
+
+To run locally against Gemini instead (e.g. to test the same path the deployed version uses), set two environment variables before starting the backend instead of installing Ollama:
+
+```bash
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your-key-here
+```
 
 ### 2. Backend
 
@@ -64,15 +74,17 @@ Flask serves the built React app directly at `http://localhost:5000` — no sepa
 
 ## API
 
+Routes marked 🔒 require an `X-App-Secret` header when `APP_SECRET` is set (see Cost & abuse protection below) — unenforced in local dev, where that env var isn't set.
+
 | Method | Route | Description |
 |---|---|---|
-| GET | `/api/health` | API status, Ollama reachability, document/chunk counts |
-| POST | `/api/upload` | Upload one or more files (`multipart/form-data`, field `files`) |
+| GET | `/api/health` | API status, LLM provider reachability, document/chunk counts |
+| POST | `/api/upload` 🔒 | Upload one or more files (`multipart/form-data`, field `files`) |
 | GET | `/api/documents` | List indexed documents with chunk counts |
-| DELETE | `/api/documents/<filename>` | Delete one document |
-| POST | `/api/query` | `{ "question": "..." }` — streamed NDJSON: `sources` (`{filename, snippet, similarity}[]`), then `token`s, then `done` |
-| POST | `/api/summarize` | `{ "filename": "..." \| null }` — streamed NDJSON summary |
-| DELETE | `/api/clear` | Delete every document |
+| DELETE | `/api/documents/<filename>` 🔒 | Delete one document |
+| POST | `/api/query` 🔒 | `{ "question": "..." }` — streamed NDJSON: `sources` (`{filename, snippet, similarity}[]`), then `token`s, then `done` |
+| POST | `/api/summarize` 🔒 | `{ "filename": "..." \| null }` — streamed NDJSON summary |
+| DELETE | `/api/clear` 🔒 | Delete every document |
 
 ## Docker
 
@@ -101,15 +113,47 @@ There's no training step here — embeddings and generation both run on frozen, 
 
 ## Deployment
 
-Docker build not yet verified in this environment (no Docker available where this was built) — the image is written correctly per Docker's multi-stage conventions and should build, but test `docker build` before relying on it.
+**Chosen architecture: frontend on Vercel, backend on Render, Gemini instead of Ollama in production.** Reasoning, not just a preference:
 
-The real constraint worth deciding on before deploying anywhere: **this app bundles Ollama, which needs to download and run two models (~2-3GB combined) and enough RAM to serve them.** That rules out most free-tier PaaS platforms (Render/Railway free tiers, Vercel, Netlify) outright. Realistic options:
+- Vercel's Python functions are stateless with a read-only filesystem and a 10s execution limit on the free tier — incompatible with this app's local ChromaDB-on-disk persistence and streaming responses. Vercel is used for what it's actually good at: hosting the static React build.
+- The backend needs a real, long-running process (to hold the ChromaDB connection and stream responses), so it goes on Render instead, which supports that on its free tier.
+- Render's free tier has no GPU and limited RAM — not enough to run Ollama's models — so the deployed backend uses `LLM_PROVIDER=gemini` instead. Local development is unaffected; it still defaults to Ollama.
 
-1. **A small VM with a persistent disk** (DigitalOcean, Hetzner, a cheap AWS/GCP instance) — at least 4-8GB RAM, Docker volume mounted at `/root/.ollama` so models aren't re-downloaded on every restart. Most control, some cost, some setup.
-2. **A paid PaaS tier with enough RAM and a persistent volume**, if the platform supports running arbitrary long-lived processes inside a container (not all do).
-3. **Swap Ollama for a hosted LLM API** (OpenAI/Anthropic/etc.) behind a config flag. This is the path of least resistance for deploying on typical serverless/free-tier platforms, since there's no multi-GB model to bundle — but it reintroduces an API cost and a key-management requirement that local Ollama was specifically chosen to avoid.
+### Backend (Render)
 
-Worth deciding together which of these fits before actually deploying.
+1. New Web Service → connect this repo.
+2. Build command: `pip install -r requirements.txt`
+3. Start command: `python app.py`
+4. Environment variables:
+   - `LLM_PROVIDER=gemini`
+   - `GEMINI_API_KEY=<your key>` (set as a Render secret, never committed)
+   - `ALLOWED_ORIGIN=<your Vercel URL>` (once you have it, so CORS only allows your actual frontend)
+   - `APP_SECRET=<any random string you generate>` — see Cost & abuse protection below
+5. Render provides a public URL like `https://your-app.onrender.com` — the API is at `https://your-app.onrender.com/api/...`.
+
+### Frontend (Vercel)
+
+1. New Project → connect this repo, set the root directory to `frontend/`.
+2. Build command: `npm run build`, output directory: `dist` (Vercel auto-detects both for a Vite project).
+3. Environment variables:
+   - `VITE_API_BASE_URL=https://your-app.onrender.com/api`
+   - `VITE_APP_SECRET=<the same random string you set as APP_SECRET on Render>`
+4. Deploy. Vercel serves the built static app; every API call goes to the Render backend.
+
+### Cost & abuse protection
+
+Once `LLM_PROVIDER=gemini` is set, every upload/question/summary spends real (paid) API quota — and the Render URL is public, so anyone who finds it could hit the API directly with curl/Postman regardless of what the frontend does. CORS doesn't stop that; CORS is a browser-only mechanism. Two layers guard against it:
+
+- **`APP_SECRET`** — `/api/upload`, `/api/query`, `/api/summarize`, `/api/clear`, and single-document delete all require an `X-App-Secret` header matching this value (skipped entirely if the env var isn't set, so local dev stays frictionless). Worth being honest about what this actually is: once the frontend is built, `VITE_APP_SECRET` ships inside the public JS bundle — anyone who opens devtools on the deployed site can read it out. It's not a real secret against a determined person; its actual job is filtering out automated scanners and casual poking at the bare backend URL that never load the frontend at all.
+- **Rate limiting** (`flask-limiter`) — 10 uploads/hour and 20 questions-or-summaries/hour per IP, regardless of whether the secret is known. This is the real backstop: even if `APP_SECRET` leaks, damage is capped.
+
+For a hard ceiling beyond both of these, set a budget alert (or a hard cap) on the Gemini API key itself in Google Cloud Console — that's the one guarantee that isn't dependent on this app's code being correct.
+
+### Known limitation of this split
+
+Render's free tier spins the backend down after ~15 minutes idle; the next request pays a 30-60s cold-start cost. Not a hard usage cap, just worth hitting the health endpoint once before a live demo to warm it up.
+
+Docker build (for the local-Ollama, single-container path) is written but not verified in this environment — no Docker available where this was built. Test `docker build` before relying on it if you go that route instead.
 
 ## Possible next steps
 
