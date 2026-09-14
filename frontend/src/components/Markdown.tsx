@@ -9,7 +9,7 @@ const components: Components = {
   ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-1 last:mb-0">{children}</ol>,
   li: ({ children }) => <li className="pl-0.5">{children}</li>,
   code: ({ children }) => (
-    <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] text-indigo-600 dark:bg-black/40 dark:text-indigo-300">
+    <code className="rounded bg-black/[0.05] px-1 py-0.5 font-mono text-[0.85em] text-violet-600 dark:bg-white/10 dark:text-violet-300">
       {children}
     </code>
   ),
@@ -18,7 +18,7 @@ const components: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-indigo-600 underline decoration-indigo-300 underline-offset-2 hover:text-indigo-500 dark:text-indigo-400 dark:decoration-indigo-700 dark:hover:text-indigo-300"
+      className="text-violet-600 underline decoration-violet-300 underline-offset-2 hover:text-violet-500 dark:text-violet-400 dark:decoration-violet-700 dark:hover:text-violet-300"
     >
       {children}
     </a>
