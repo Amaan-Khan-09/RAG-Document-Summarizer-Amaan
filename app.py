@@ -178,7 +178,11 @@ def query():
         return jsonify({"error": "No question provided"}), 400
 
     n_results = data.get('n_results', 5)
-    return ndjson_stream(rag.query_stream(question, n_results))
+    # Distinct from `None`: an explicit `[]` means every document was
+    # excluded via the source-filter checkboxes, and must search nothing --
+    # `... or None` would silently discard it and search everything instead.
+    included_filenames = data.get('included_filenames')
+    return ndjson_stream(rag.query_stream(question, n_results, included_filenames))
 
 
 @app.route('/api/summarize', methods=['POST'])

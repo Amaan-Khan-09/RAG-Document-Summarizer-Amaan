@@ -99,11 +99,12 @@ export async function streamQuery(
   question: string,
   onEvent: (event: NdjsonEvent) => void,
   signal?: AbortSignal,
+  includedFilenames?: string[],
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/query`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, included_filenames: includedFilenames }),
     signal,
   })
   await consumeNdjsonStream(res, onEvent)

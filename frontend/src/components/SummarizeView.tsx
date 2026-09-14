@@ -49,7 +49,7 @@ export default function SummarizeView({ documents }: { documents: DocumentInfo[]
 
   if (documents.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-zinc-600">
+      <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-zinc-500 dark:text-zinc-600">
         <ListChecks className="h-8 w-8" />
         <p className="text-sm">Upload a document to generate a summary</p>
       </div>
@@ -62,7 +62,7 @@ export default function SummarizeView({ documents }: { documents: DocumentInfo[]
         <select
           value={target}
           onChange={(e) => setTarget(e.target.value)}
-          className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+          className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-800 transition-colors focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-200"
         >
           <option value="__all__">All documents</option>
           {documents.map((doc) => (
@@ -75,7 +75,7 @@ export default function SummarizeView({ documents }: { documents: DocumentInfo[]
         {isStreaming ? (
           <button
             onClick={() => abortRef.current?.abort()}
-            className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3.5 py-2 text-sm font-medium text-zinc-200 transition-colors hover:bg-zinc-700"
+            className="flex items-center gap-1.5 rounded-lg bg-zinc-200 px-3.5 py-2 text-sm font-medium text-zinc-800 transition-colors hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
           >
             <Square className="h-3 w-3 fill-current" />
             Stop
@@ -92,13 +92,13 @@ export default function SummarizeView({ documents }: { documents: DocumentInfo[]
       </div>
 
       {error && (
-        <div className="rounded-lg border border-red-900 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-900 dark:bg-red-500/10 dark:text-red-400">
           {error}
         </div>
       )}
 
       {!error && hasRun && (
-        <div className="group animate-fade-in rounded-xl border border-zinc-800 bg-zinc-900/60 p-5">
+        <div className="group animate-fade-in rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
           <div className="mb-1 flex items-start justify-between gap-2">
             <div className="flex-1">
               {summary ? (
@@ -120,7 +120,7 @@ export default function SummarizeView({ documents }: { documents: DocumentInfo[]
       )}
 
       {!hasRun && !error && (
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center text-zinc-600">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 py-16 text-center text-zinc-500 dark:text-zinc-600">
           <ListChecks className="h-8 w-8" />
           <p className="text-sm">Pick a document (or all of them) and generate a summary</p>
         </div>

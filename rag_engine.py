@@ -106,38 +106,57 @@ class RAGEngine:
 
         return len(chunks)
 
-    def query(self, question, n_results=5):
+    def query(self, question, n_results=5, included_filenames=None):
         """Query the vector database (non-streaming)."""
-        sources, prompt = self._build_query_prompt(question, n_results)
+        if included_filenames is not None and not included_filenames:
+            return None, []
+
+        embedding = llm_provider.embed(question, task_type="RETRIEVAL_QUERY")
+        results = self._search(embedding, n_results, included_filenames)
+        sources, prompt = self._sources_and_prompt(question, results)
         if prompt is None:
             return None, []
 
         return llm_provider.generate(prompt), sources
 
-    def query_stream(self, question, n_results=5):
-        """Query the vector database, yielding response tokens as they're
-        generated. Yields ("sources", list[dict]) once, then ("token", str)
-        for each generated piece. Each source dict is
+    def query_stream(self, question, n_results=5, included_filenames=None):
+        """Query the vector database, yielding progress as it happens. Yields
+        ("status", str) immediately before each real retrieval stage runs
+        (not simulated -- these are the actual steps, in the actual order),
+        then ("sources", list[dict]) once retrieval completes, then
+        ("token", str) for each generated piece. Each source dict is
         {filename, snippet, similarity} so the UI can show *what* was
         actually retrieved, not just claim a filename was relevant."""
-        sources, prompt = self._build_query_prompt(question, n_results)
+        if included_filenames is not None and not included_filenames:
+            yield ("error", "No documents selected. Include at least one document to search.")
+            return
+
+        yield ("status", "Embedding your question...")
+        embedding = llm_provider.embed(question, task_type="RETRIEVAL_QUERY")
+
+        yield ("status", "Searching indexed documents...")
+        results = self._search(embedding, n_results, included_filenames)
+        sources, prompt = self._sources_and_prompt(question, results)
         if prompt is None:
             yield ("error", "No documents found. Please upload documents first.")
             return
 
         yield ("sources", sources)
+        yield ("status", "Generating answer...")
         for token in llm_provider.generate_stream(prompt):
             yield ("token", token)
 
-    def _build_query_prompt(self, question, n_results):
-        query_embedding = llm_provider.embed(question, task_type="RETRIEVAL_QUERY")
-
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
+    def _search(self, embedding, n_results, included_filenames=None):
+        """Retrieve the top matching chunks for an already-computed embedding."""
+        where = {"filename": {"$in": included_filenames}} if included_filenames else None
+        return self.collection.query(
+            query_embeddings=[embedding],
             n_results=n_results,
             include=["documents", "metadatas", "distances"],
+            where=where,
         )
 
+    def _sources_and_prompt(self, question, results):
         if not results['documents'][0]:
             return [], None
 
