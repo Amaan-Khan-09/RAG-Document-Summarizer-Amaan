@@ -217,13 +217,30 @@ def generate(prompt):
     return _GENERATE_FNS[CHAT_PROVIDER](prompt)
 
 
+_HEALTH_CACHE_TTL = 60  # seconds
+_health_cache = {"result": None, "checked_at": 0.0}
+
+
 def health_check():
     """True only if both the chat backend and the embedding backend (when
-    they're different providers) are reachable."""
+    they're different providers) are reachable.
+
+    Cached for _HEALTH_CACHE_TTL: the frontend polls this every
+    HEALTH_POLL_MS, and for cloud providers a "real" check is a live network
+    call (Groq's models.list(), Gemini's embed_content("ping")) -- without
+    caching, an idle open tab would silently spend a real Gemini embedding
+    call every poll, indefinitely, for zero user benefit.
+    """
+    now = time.time()
+    if _health_cache["result"] is not None and now - _health_cache["checked_at"] < _HEALTH_CACHE_TTL:
+        return _health_cache["result"]
+
     chat_ok = _HEALTH_FNS[CHAT_PROVIDER]()
-    if EMBED_PROVIDER == CHAT_PROVIDER:
-        return chat_ok
-    return chat_ok and _EMBED_HEALTH_FNS[EMBED_PROVIDER]()
+    result = chat_ok if EMBED_PROVIDER == CHAT_PROVIDER else chat_ok and _EMBED_HEALTH_FNS[EMBED_PROVIDER]()
+
+    _health_cache["result"] = result
+    _health_cache["checked_at"] = now
+    return result
 
 
 _chat_label = {"ollama": "Ollama (local)", "groq": f"Groq ({GROQ_CHAT_MODEL})", "gemini": f"Gemini ({GEMINI_CHAT_MODEL})"}[CHAT_PROVIDER]
