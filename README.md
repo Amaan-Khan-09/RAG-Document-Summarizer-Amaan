@@ -124,13 +124,13 @@ There's no training step here — embeddings and generation both run on frozen, 
 
 ## Deployment
 
-**Chosen architecture: frontend on Vercel, backend on Render, Groq (chat) + Gemini (embeddings) instead of Ollama in production.** Reasoning, not just a preference:
+**Chosen architecture: both frontend and backend on Render (two free services, one account), Groq (chat) + Gemini (embeddings) instead of Ollama in production.** Reasoning, not just a preference:
 
-- Vercel's Python functions are stateless with a read-only filesystem and a 10s execution limit on the free tier — incompatible with this app's local ChromaDB-on-disk persistence and streaming responses. Vercel is used for what it's actually good at: hosting the static React build.
-- The backend needs a real, long-running process (to hold the ChromaDB connection and stream responses), so it goes on Render instead, which supports that on its free tier.
-- Render's free tier has no GPU and limited RAM — not enough to run Ollama's models — so the deployed backend swaps to hosted providers. Groq was picked for chat specifically for its free tier and very fast streaming; it has no embeddings API at all, so Gemini's cheap embedding model (~$0.003 to embed a 19-page paper, per the Validation numbers below) fills that one gap. Local development is unaffected; it still defaults to Ollama for both.
+- The backend needs a real, long-running process (to hold the ChromaDB connection and stream responses) and a persistent-enough filesystem for ChromaDB's on-disk storage — Render's free web services support that; stateless serverless platforms (Vercel, Netlify) don't.
+- The frontend is a static build, and Render's free static-site hosting (CDN + SSL, no credit card, no Dockerfile) covers that natively, same as Vercel would — no need for a second platform/account just for that.
+- Render's free tier has no GPU and only 512MB RAM/0.1 CPU — no local model would fit — so the deployed backend swaps to hosted providers. Groq was picked for chat specifically for its free tier and very fast streaming; it has no embeddings API at all, so Gemini's cheap embedding model (~$0.003 to embed a 19-page paper, per the Validation numbers below) fills that one gap. Local development is unaffected; it still defaults to Ollama for both.
 
-### Backend (Render)
+### Backend (Render Web Service)
 
 1. New Web Service → connect this repo.
 2. Build command: `pip install -r requirements.txt`
@@ -139,18 +139,18 @@ There's no training step here — embeddings and generation both run on frozen, 
    - `LLM_PROVIDER=groq`
    - `GROQ_API_KEY=<your key>` (set as a Render secret, never committed)
    - `GEMINI_API_KEY=<your key>` (embeddings only — `EMBED_PROVIDER` defaults to `gemini` automatically when `LLM_PROVIDER=groq`)
-   - `ALLOWED_ORIGIN=<your Vercel URL>` (once you have it, so CORS only allows your actual frontend)
+   - `ALLOWED_ORIGIN=<your Render static site URL>` (once you have it, so CORS only allows your actual frontend)
    - `APP_SECRET=<any random string you generate>` — see Cost & abuse protection below
 5. Render provides a public URL like `https://your-app.onrender.com` — the API is at `https://your-app.onrender.com/api/...`.
 
-### Frontend (Vercel)
+### Frontend (Render Static Site)
 
-1. New Project → connect this repo, set the root directory to `frontend/`.
-2. Build command: `npm run build`, output directory: `dist` (Vercel auto-detects both for a Vite project).
-3. Environment variables:
+1. New Static Site → connect this repo, set the root directory to `frontend/`.
+2. Build command: `npm run build`, publish directory: `dist`.
+3. Environment variables (set before building, Render applies these at build time same as Vercel would):
    - `VITE_API_BASE_URL=https://your-app.onrender.com/api`
-   - `VITE_APP_SECRET=<the same random string you set as APP_SECRET on Render>`
-4. Deploy. Vercel serves the built static app; every API call goes to the Render backend.
+   - `VITE_APP_SECRET=<the same random string you set as APP_SECRET on the backend service>`
+4. Deploy. Render serves the built static app from its own URL; every API call goes to the backend Web Service.
 
 ### Cost & abuse protection
 
