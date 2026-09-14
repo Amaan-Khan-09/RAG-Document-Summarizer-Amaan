@@ -12,6 +12,7 @@ export default function StatusBadge({ health }: { health: HealthStatus | null })
   }
 
   const ok = health.ollama_connected
+  const provider = health.provider || 'LLM'
 
   return (
     <div className="flex items-center gap-2 text-xs">
@@ -19,7 +20,7 @@ export default function StatusBadge({ health }: { health: HealthStatus | null })
         className={`h-2.5 w-2.5 ${ok ? 'fill-emerald-500 text-emerald-500' : 'fill-red-500 text-red-500'}`}
       />
       <span className={ok ? 'text-zinc-400' : 'text-red-400'}>
-        {ok ? 'Ollama connected' : 'Ollama unreachable'}
+        {ok ? `${provider} connected` : `${provider} unreachable`}
       </span>
     </div>
   )

@@ -2,18 +2,42 @@
 
 import json
 import os
+from functools import wraps
 
-import ollama
 from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from werkzeug.utils import secure_filename
 
+import llm_provider
 from rag_engine import RAGEngine
 
 FRONTEND_DIST = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 
 app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path="")
-CORS(app)
+# When the frontend is deployed separately (e.g. on Vercel) rather than
+# served by this same Flask app, set ALLOWED_ORIGIN to that exact origin.
+CORS(app, origins=os.environ.get("ALLOWED_ORIGIN", "*"))
+
+# CORS only stops *browser* cross-origin requests -- it does nothing against
+# curl/Postman/a script hitting this URL directly. When LLM_PROVIDER=gemini,
+# every upload/query/summarize call spends real (paid) API quota, so those
+# routes are gated behind a shared secret the frontend also holds, plus a
+# request-rate ceiling as a second layer in case the secret ever leaks.
+APP_SECRET = os.environ.get("APP_SECRET")
+
+limiter = Limiter(get_remote_address, app=app, default_limits=[])
+
+
+def require_app_secret(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if APP_SECRET and request.headers.get("X-App-Secret") != APP_SECRET:
+            return jsonify({"error": "Unauthorized"}), 401
+        return fn(*args, **kwargs)
+    return wrapped
+
 
 UPLOAD_FOLDER = './uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'txt'}
@@ -43,12 +67,8 @@ def ndjson_stream(events):
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    """Health check: reports API status, Ollama reachability, and doc count."""
-    ollama_ok = True
-    try:
-        ollama.list()
-    except Exception:
-        ollama_ok = False
+    """Health check: reports API status, LLM provider reachability, and doc count."""
+    provider_ok = llm_provider.health_check()
 
     try:
         stats = rag.get_stats()
@@ -57,12 +77,15 @@ def health():
 
     return jsonify({
         "status": "ok",
-        "ollama_connected": ollama_ok,
+        "provider": llm_provider.PROVIDER_LABEL,
+        "ollama_connected": provider_ok,  # kept for frontend backwards-compat
         **stats,
     }), 200
 
 
 @app.route('/api/upload', methods=['POST'])
+@require_app_secret
+@limiter.limit("10 per hour")
 def upload_files():
     """Upload and process documents."""
     files = request.files.getlist('files') or request.files.getlist('files[]')
@@ -116,6 +139,7 @@ def list_documents():
 
 
 @app.route('/api/documents/<path:filename>', methods=['DELETE'])
+@require_app_secret
 def delete_document(filename):
     """Delete a single document (and all its chunks)."""
     try:
@@ -128,6 +152,8 @@ def delete_document(filename):
 
 
 @app.route('/api/query', methods=['POST'])
+@require_app_secret
+@limiter.limit("20 per hour")
 def query():
     """Ask a question, streamed as newline-delimited JSON."""
     data = request.get_json(silent=True) or {}
@@ -141,6 +167,8 @@ def query():
 
 
 @app.route('/api/summarize', methods=['POST'])
+@require_app_secret
+@limiter.limit("20 per hour")
 def summarize():
     """Summarize one document (or all documents), streamed as NDJSON."""
     data = request.get_json(silent=True) or {}
@@ -149,6 +177,7 @@ def summarize():
 
 
 @app.route('/api/clear', methods=['DELETE'])
+@require_app_secret
 def clear():
     """Clear all documents from the database."""
     try:

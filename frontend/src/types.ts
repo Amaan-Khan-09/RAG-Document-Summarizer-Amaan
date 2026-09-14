@@ -5,6 +5,7 @@ export interface DocumentInfo {
 
 export interface HealthStatus {
   status: string
+  provider: string
   ollama_connected: boolean
   total_chunks: number
   total_documents: number

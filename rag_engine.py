@@ -5,9 +5,10 @@ import os
 import chromadb
 from pypdf import PdfReader
 from docx import Document
-import ollama
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+
+import llm_provider
 
 EMBED_WORKERS = 8
 
@@ -63,14 +64,6 @@ class RAGEngine:
 
         return chunks
 
-    def get_embedding(self, text):
-        """Generate embedding using Ollama"""
-        response = ollama.embeddings(
-            model="nomic-embed-text",
-            prompt=text
-        )
-        return response["embedding"]
-
     def add_document(self, filepath, filename):
         """Process and add document to vector database.
 
@@ -95,16 +88,17 @@ class RAGEngine:
         # idempotent (upsert semantics at the document level).
         self.collection.delete(where={"filename": filename})
 
-        # Dispatched concurrently on the client side. Measured on an
-        # 87-chunk PDF: this made ~no difference (34.5s vs 35.8s
+        # Dispatched concurrently on the client side. Measured on Ollama with
+        # an 87-chunk PDF: this made ~no difference (34.5s vs 35.8s
         # sequential), because this machine's Ollama has
         # OLLAMA_NUM_PARALLEL=1, which serializes inference server-side
         # regardless of how many requests arrive at once. Left in place
-        # (harmless, and a real win on a server configured with
-        # OLLAMA_NUM_PARALLEL>1) -- see README for the honest before/after
-        # numbers and what would actually fix this.
+        # (harmless there, and a real win both on a server configured with
+        # OLLAMA_NUM_PARALLEL>1 and on Gemini, which does serve concurrent
+        # requests) -- see README for the honest before/after numbers.
+        embed_document_chunk = lambda chunk: llm_provider.embed(chunk, task_type="RETRIEVAL_DOCUMENT")
         with ThreadPoolExecutor(max_workers=EMBED_WORKERS) as pool:
-            embeddings = list(pool.map(self.get_embedding, chunks))
+            embeddings = list(pool.map(embed_document_chunk, chunks))
 
         ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
         documents = chunks
@@ -126,8 +120,7 @@ class RAGEngine:
         if prompt is None:
             return None, []
 
-        response = ollama.generate(model="llama3.2", prompt=prompt)
-        return response['response'], sources
+        return llm_provider.generate(prompt), sources
 
     def query_stream(self, question, n_results=5):
         """Query the vector database, yielding response tokens as they're
@@ -141,13 +134,11 @@ class RAGEngine:
             return
 
         yield ("sources", sources)
-        for part in ollama.generate(model="llama3.2", prompt=prompt, stream=True):
-            token = part.get("response", "")
-            if token:
-                yield ("token", token)
+        for token in llm_provider.generate_stream(prompt):
+            yield ("token", token)
 
     def _build_query_prompt(self, question, n_results):
-        query_embedding = self.get_embedding(question)
+        query_embedding = llm_provider.embed(question, task_type="RETRIEVAL_QUERY")
 
         results = self.collection.query(
             query_embeddings=[query_embedding],
@@ -198,8 +189,7 @@ Answer (be specific and cite which document if relevant):"""
         if prompt is None:
             return "No documents found."
 
-        response = ollama.generate(model="llama3.2", prompt=prompt)
-        return response['response']
+        return llm_provider.generate(prompt)
 
     def summarize_stream(self, filename=None):
         """Generate summary of documents, yielding tokens as they arrive."""
@@ -208,10 +198,8 @@ Answer (be specific and cite which document if relevant):"""
             yield ("error", "No documents found.")
             return
 
-        for part in ollama.generate(model="llama3.2", prompt=prompt, stream=True):
-            token = part.get("response", "")
-            if token:
-                yield ("token", token)
+        for token in llm_provider.generate_stream(prompt):
+            yield ("token", token)
 
     def _build_summary_prompt(self, filename=None):
         if filename:
