@@ -18,7 +18,7 @@ CHAT_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama").lower()
 _default_embed_provider = "gemini" if CHAT_PROVIDER == "groq" else CHAT_PROVIDER
 EMBED_PROVIDER = os.environ.get("EMBED_PROVIDER", _default_embed_provider).lower()
 
-GROQ_CHAT_MODEL = os.environ.get("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile")
+GROQ_CHAT_MODEL = os.environ.get("GROQ_CHAT_MODEL", "openai/gpt-oss-20b")
 GEMINI_CHAT_MODEL = os.environ.get("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
 GEMINI_EMBED_MODEL = os.environ.get("GEMINI_EMBED_MODEL", "gemini-embedding-001")
 GEMINI_EMBED_DIM = 768  # default is 3072; 768 is plenty at this scale and cheaper
