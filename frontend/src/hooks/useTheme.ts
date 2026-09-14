@@ -10,7 +10,7 @@ function getInitialTheme(): Theme {
   } catch {
     // localStorage unavailable (private browsing, etc.) -- fall through to default
   }
-  return 'light'
+  return 'dark'
 }
 
 export function useTheme() {

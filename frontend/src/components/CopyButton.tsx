@@ -18,7 +18,7 @@ export default function CopyButton({ text }: { text: string }) {
     <button
       onClick={handleCopy}
       title="Copy"
-      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 dark:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+      className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-zinc-400 transition-colors hover:bg-black/5 hover:text-zinc-700 dark:text-zinc-600 dark:hover:bg-white/10 dark:hover:text-zinc-300"
     >
       {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
     </button>

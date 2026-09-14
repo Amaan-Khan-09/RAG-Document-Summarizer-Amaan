@@ -17,9 +17,14 @@ export default function StatusBadge({ health }: { health: HealthStatus | null })
 
   return (
     <div className="flex items-center gap-1.5 text-xs" title={label}>
-      <Circle
-        className={`h-2.5 w-2.5 shrink-0 ${ok ? 'fill-emerald-500 text-emerald-500' : 'fill-red-500 text-red-500'}`}
-      />
+      <span className="relative flex h-2.5 w-2.5 shrink-0">
+        {ok && (
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+        )}
+        <Circle
+          className={`relative h-2.5 w-2.5 shrink-0 ${ok ? 'fill-emerald-500 text-emerald-500' : 'fill-red-500 text-red-500'}`}
+        />
+      </span>
       <span className={`truncate ${ok ? 'text-zinc-500 dark:text-zinc-400' : 'text-red-500 dark:text-red-400'}`}>
         {label}
       </span>

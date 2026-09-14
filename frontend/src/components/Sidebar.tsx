@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { Sparkles, Trash } from 'lucide-react'
+import { Sparkles, Trash, X } from 'lucide-react'
+import { AnimatePresence, motion } from 'framer-motion'
 import StatusBadge from './StatusBadge'
 import UploadDropzone from './UploadDropzone'
 import DocumentList from './DocumentList'
@@ -8,7 +9,7 @@ import { clearAll } from '../lib/api'
 import type { Theme } from '../hooks/useTheme'
 import type { DocumentInfo, HealthStatus } from '../types'
 
-export default function Sidebar({
+function SidebarContent({
   health,
   documents,
   excludedFilenames,
@@ -16,6 +17,8 @@ export default function Sidebar({
   onRefresh,
   theme,
   onToggleTheme,
+  onClose,
+  showCloseButton,
 }: {
   health: HealthStatus | null
   documents: DocumentInfo[]
@@ -24,6 +27,8 @@ export default function Sidebar({
   onRefresh: () => void
   theme: Theme
   onToggleTheme: () => void
+  onClose?: () => void
+  showCloseButton?: boolean
 }) {
   const [clearing, setClearing] = useState(false)
   const includedCount = documents.length - excludedFilenames.size
@@ -40,9 +45,9 @@ export default function Sidebar({
   }
 
   return (
-    <aside className="flex h-full w-72 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-      <div className="flex items-center gap-2.5 border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-violet-600 shadow-lg shadow-indigo-200 dark:shadow-indigo-950/50">
+    <div className="flex h-full w-72 shrink-0 flex-col">
+      <div className="flex items-center gap-2.5 border-b border-black/5 px-4 py-4 dark:border-white/10">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-lg shadow-indigo-500/20">
           <Sparkles className="h-4 w-4 text-white" />
         </div>
         <div className="min-w-0 flex-1">
@@ -50,22 +55,31 @@ export default function Sidebar({
           <StatusBadge health={health} />
         </div>
         <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+        {showCloseButton && (
+          <button
+            onClick={onClose}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-black/5 dark:text-zinc-400 dark:hover:bg-white/5"
+            aria-label="Close sidebar"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      <div className="border-b border-zinc-200 px-4 py-4 dark:border-zinc-800">
+      <div className="border-b border-black/5 px-4 py-4 dark:border-white/10">
         <UploadDropzone onUploaded={onRefresh} />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-2 py-3">
         <div className="flex items-center justify-between px-2 pb-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-600">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
             Documents {documents.length > 0 && `(${documents.length})`}
           </span>
           {documents.length > 0 && (
             <button
               onClick={handleClearAll}
               disabled={clearing}
-              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:text-zinc-600 dark:hover:bg-red-500/10 dark:hover:text-red-400"
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-zinc-500 transition-colors hover:bg-red-500/10 hover:text-red-500 disabled:opacity-50 dark:text-zinc-500 dark:hover:text-red-400"
             >
               <Trash className="h-3 w-3" />
               Clear all
@@ -88,11 +102,60 @@ export default function Sidebar({
       </div>
 
       {health && (
-        <div className="border-t border-zinc-200 px-4 py-3 text-[10px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-600">
+        <div className="border-t border-black/5 px-4 py-3 text-[10px] text-zinc-500 dark:border-white/10 dark:text-zinc-500">
           {health.total_chunks} chunks indexed across {health.total_documents} document
           {health.total_documents === 1 ? '' : 's'}
         </div>
       )}
-    </aside>
+    </div>
+  )
+}
+
+export default function Sidebar(props: {
+  health: HealthStatus | null
+  documents: DocumentInfo[]
+  excludedFilenames: Set<string>
+  onToggleDocument: (filename: string) => void
+  onRefresh: () => void
+  theme: Theme
+  onToggleTheme: () => void
+  isMobile: boolean
+  open: boolean
+  onClose: () => void
+}) {
+  const { isMobile, open, onClose, ...rest } = props
+
+  if (!isMobile) {
+    return (
+      <aside className="glass-panel relative z-10 hidden h-full border-r md:flex">
+        <SidebarContent {...rest} />
+      </aside>
+    )
+  }
+
+  return (
+    <AnimatePresence>
+      {open && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            onClick={onClose}
+            className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+          />
+          <motion.aside
+            initial={{ x: '-100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '-100%' }}
+            transition={{ type: 'spring', stiffness: 340, damping: 34 }}
+            className="glass-panel fixed inset-y-0 left-0 z-50 border-r shadow-2xl md:hidden"
+          >
+            <SidebarContent {...rest} onClose={onClose} showCloseButton />
+          </motion.aside>
+        </>
+      )}
+    </AnimatePresence>
   )
 }
