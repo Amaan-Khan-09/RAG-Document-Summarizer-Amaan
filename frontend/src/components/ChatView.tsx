@@ -74,6 +74,8 @@ export default function ChatView({
           } else if (event.type === 'token') {
             content += event.data
             updateAssistant({ content, status: undefined })
+          } else if (event.type === 'suggestions') {
+            updateAssistant({ suggestions: event.data })
           } else if (event.type === 'error') {
             updateAssistant({ error: event.data, isStreaming: false, status: undefined })
           } else if (event.type === 'done') {
@@ -149,7 +151,7 @@ export default function ChatView({
 
         <div className="mx-auto flex max-w-2xl flex-col gap-5">
           <AnimatePresence initial={false}>
-            {messages.map((msg) => (
+            {messages.map((msg, i) => (
               <motion.div
                 key={msg.id}
                 initial={{ opacity: 0, y: 10 }}
@@ -208,6 +210,30 @@ export default function ChatView({
                         </div>
                       )}
                     </div>
+
+                    {i === messages.length - 1 && !msg.isStreaming && msg.suggestions && msg.suggestions.length > 0 && (
+                      <div className="flex flex-col gap-1.5 pt-1">
+                        <span className="text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+                          Ask a follow-up
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {msg.suggestions.map((s, idx) => (
+                            <motion.button
+                              key={s}
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ delay: 0.06 * idx, duration: 0.2 }}
+                              whileHover={{ scale: 1.03 }}
+                              whileTap={{ scale: 0.97 }}
+                              onClick={() => send(s)}
+                              className="glass-surface rounded-full border border-black/5 px-3 py-1.5 text-left text-xs text-zinc-600 shadow-sm transition-colors hover:border-violet-300 hover:text-zinc-900 dark:border-white/10 dark:text-zinc-400 dark:hover:border-violet-500/50 dark:hover:text-zinc-100"
+                            >
+                              {s}
+                            </motion.button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
