@@ -14,6 +14,7 @@ from flask import Flask, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.utils import secure_filename
 
 import llm_provider
@@ -25,6 +26,14 @@ app = Flask(__name__, static_folder=FRONTEND_DIST, static_url_path="")
 # When the frontend is deployed separately (e.g. on Vercel) rather than
 # served by this same Flask app, set ALLOWED_ORIGIN to that exact origin.
 CORS(app, origins=os.environ.get("ALLOWED_ORIGIN", "*"))
+
+# Render (like most PaaS platforms) sits its own proxy in front of the app,
+# so request.remote_addr would otherwise be Render's proxy IP for every
+# request rather than the real client's -- which would make the per-IP rate
+# limits below apply globally across all visitors instead of per-visitor.
+# ProxyFix reads the real client IP from the X-Forwarded-For header the
+# proxy sets. Safe to apply unconditionally: it's a no-op with no proxy.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
 # CORS only stops *browser* cross-origin requests -- it does nothing against
 # curl/Postman/a script hitting this URL directly. When LLM_PROVIDER=gemini,
