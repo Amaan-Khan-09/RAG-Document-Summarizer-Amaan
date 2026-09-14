@@ -80,7 +80,13 @@ if CHAT_PROVIDER == "gemini" or EMBED_PROVIDER == "gemini":
         raise RuntimeError(
             "GEMINI_API_KEY is required (used for chat and/or embeddings) but not set."
         )
-    _gemini_client = genai.Client(api_key=_gemini_key)
+    # Without an explicit timeout, a stalled outbound call hangs the request
+    # indefinitely instead of failing fast -- a real problem in a Flask
+    # worker thread, since one hung request can block others behind it.
+    _gemini_client = genai.Client(
+        api_key=_gemini_key,
+        http_options=_genai_types.HttpOptions(timeout=20000),  # milliseconds
+    )
 
 if EMBED_PROVIDER == "gemini":
     def _gemini_embed(text, task_type="RETRIEVAL_DOCUMENT"):
@@ -133,7 +139,9 @@ if CHAT_PROVIDER == "groq":
     _groq_key = os.environ.get("GROQ_API_KEY")
     if not _groq_key:
         raise RuntimeError("LLM_PROVIDER=groq but GROQ_API_KEY is not set.")
-    _groq_client = Groq(api_key=_groq_key)
+    # Same reasoning as the Gemini client's http_options timeout above: fail
+    # fast on a stalled call instead of hanging the request indefinitely.
+    _groq_client = Groq(api_key=_groq_key, timeout=20.0)
 
     def _groq_generate_stream(prompt):
         def _call():
