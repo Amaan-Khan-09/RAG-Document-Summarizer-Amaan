@@ -2,28 +2,20 @@
 
 
 import os
-import chromadb
 from pypdf import PdfReader
 from docx import Document
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
 
 import llm_provider
+from vector_store import VectorStore
 
 EMBED_WORKERS = 8
 
 class RAGEngine:
     def __init__(self, persist_dir="./chroma_db"):
         self.persist_dir = persist_dir
-        self.client = chromadb.PersistentClient(
-            path=persist_dir,
-            settings=chromadb.config.Settings(anonymized_telemetry=False),
-        )
-
-        self.collection = self.client.get_or_create_collection(
-            name="documents",
-            metadata={"hnsw:space": "cosine"},
-        )
+        self.collection = VectorStore(persist_dir)
 
     def extract_text(self, filepath):
         """Extract text from PDF, DOCX, or TXT files"""

@@ -6,12 +6,12 @@ Chat/generation and embeddings are independently swappable, controlled by env va
 
 ## Tech Stack
 
-**Backend:** Python, Flask, ChromaDB (vector store), a swappable provider layer — Ollama (`llama3.2` + `nomic-embed-text`) locally; Groq (`llama-3.3-70b-versatile`) for chat + Gemini (`gemini-embedding-001`) for embeddings in production
+**Backend:** Python, Flask, a small numpy-based vector store (see below), a swappable provider layer — Ollama (`llama3.2` + `nomic-embed-text`) locally; Groq (`openai/gpt-oss-20b`) for chat + Gemini (`gemini-embedding-001`) for embeddings in production
 **Frontend:** React, TypeScript, Tailwind CSS v4, Vite
 
 ## Features
 
-- Drag-and-drop upload for PDF / DOCX / TXT, chunked (1,000 chars, 200-char overlap) and embedded into a persistent ChromaDB collection
+- Drag-and-drop upload for PDF / DOCX / TXT, chunked (1,000 chars, 200-char overlap) and embedded into a persistent local vector store
 - Chat interface that answers questions grounded in your documents, streamed token-by-token and rendered as real markdown, with a stop button to cancel generation mid-stream
 - Citations that show the actual retrieved snippet and similarity score on click — not just a filename claiming relevance, but the evidence itself
 - Per-document or all-documents summarization, also streamed live, with one-click copy
@@ -128,9 +128,15 @@ There's no training step here — embeddings and generation both run on frozen, 
 
 **Chosen architecture: both frontend and backend on Render (two free services, one account), Groq (chat) + Gemini (embeddings) instead of Ollama in production.** Reasoning, not just a preference:
 
-- The backend needs a real, long-running process (to hold the ChromaDB connection and stream responses) and a persistent-enough filesystem for ChromaDB's on-disk storage — Render's free web services support that; stateless serverless platforms (Vercel, Netlify) don't.
+- The backend needs a real, long-running process (to hold the vector store and stream responses) and a persistent-enough filesystem for its on-disk storage — Render's free web services support that; stateless serverless platforms (Vercel, Netlify) don't.
 - The frontend is a static build, and Render's free static-site hosting (CDN + SSL, no credit card, no Dockerfile) covers that natively, same as Vercel would — no need for a second platform/account just for that.
 - Render's free tier has no GPU and only 512MB RAM/0.1 CPU — no local model would fit — so the deployed backend swaps to hosted providers. Groq was picked for chat specifically for its free tier and very fast streaming; it has no embeddings API at all, so Gemini's cheap embedding model (~$0.003 to embed a 19-page paper, per the Validation numbers below) fills that one gap. Local development is unaffected; it still defaults to Ollama for both.
+
+### Why ChromaDB was replaced with a plain numpy vector store
+
+This app originally used ChromaDB, which pulls in a genuinely heavy dependency chain (onnxruntime, gRPC, protobuf, OpenTelemetry, a Kubernetes client) for features this app never uses — Chroma's own embedding functions, its distributed mode, its telemetry. Under Render's free-tier 0.1 CPU, that import chain took long enough that gunicorn's worker never finished booting before something killed it, and it never got the chance to try again successfully — confirmed by live testing: a real request came back as a 502 after **123 seconds** — Render's own platform-level proxy giving up waiting on the origin, not a client-side or gunicorn-level timeout at all. Raising gunicorn's own `--timeout` from 120 to 300 changed nothing (a second live test cut off at almost the identical ~122 seconds), which is exactly what you'd expect if the real ceiling was Render's own gateway timeout rather than anything configurable in this app.
+
+At this app's actual scale — hundreds of chunks, not millions — a plain numpy cosine-similarity scan (`vector_store.py`) does the identical job with none of that weight: no HNSW index needed, no native compiled libraries, no telemetry stack. Verified after the swap: a completely clean install resolves with no chromadb/onnxruntime/grpc in the tree at all, and the full upload → query → retrieve → cite → delete → clear pipeline was re-tested end to end locally and behaves identically to before.
 
 ### Backend (Render Web Service)
 
@@ -138,11 +144,9 @@ There's no training step here — embeddings and generation both run on frozen, 
 2. Build command: `pip install -r requirements.txt`
 3. Start command:
    ```
-   gunicorn --workers 1 --threads 4 --timeout 300 --graceful-timeout 30 --max-requests 200 --max-requests-jitter 50 app:app
+   gunicorn --workers 1 --threads 4 --timeout 120 --graceful-timeout 30 --max-requests 200 --max-requests-jitter 50 app:app
    ```
-   Not `python app.py` — that runs Flask's built-in dev server, which explicitly warns against production use. One worker with several threads (not several worker processes) because Render's free tier is only 512MB RAM and each additional worker process would duplicate the ChromaDB connection in memory. `--max-requests` recycles the worker periodically (standard production hardening against any slow resource creep over a long-running process); the jitter staggers it so it doesn't recycle at a perfectly predictable interval.
-
-   **`--timeout 300` is the important one, raised from 120 after a real failure**: this app's import chain (chromadb + onnxruntime + grpc + two AI SDKs, ~112MB) is heavy enough that under Render free tier's 0.1 CPU, a cold boot can plausibly take well over two minutes. Gunicorn's `--timeout` kills a worker it hasn't heard from within that window and restarts it -- if the import itself takes longer than the timeout, the worker never finishes booting before being killed, and repeats forever without ever successfully starting. Confirmed via a real deploy: a request that got a 502 after 123s (Render's own proxy giving up waiting, not a client-side issue) followed by every subsequent request hanging completely, consistent with an endless kill-and-restart-mid-boot loop against too-short a timeout.
+   Not `python app.py` — that runs Flask's built-in dev server, which explicitly warns against production use. One worker with several threads (not several worker processes) because Render's free tier is only 512MB RAM and each additional worker process would duplicate the vector store in memory. `--max-requests` recycles the worker periodically (standard production hardening against any slow resource creep over a long-running process); the jitter staggers it so it doesn't recycle at a perfectly predictable interval. `--timeout` back down to a normal 120 now that the actual cause (import weight, not the timeout value) is fixed.
 4. Environment variables:
    - `LLM_PROVIDER=groq`
    - `GROQ_API_KEY=<your key>` (set as a Render secret, never committed)
