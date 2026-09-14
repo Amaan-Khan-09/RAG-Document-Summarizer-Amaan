@@ -5,12 +5,14 @@ import os
 from pypdf import PdfReader
 from docx import Document
 import hashlib
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 import llm_provider
 from vector_store import VectorStore
 
 EMBED_WORKERS = 8
+FOLLOWUP_MARKER = "FOLLOWUP_QUESTIONS:"
 
 class RAGEngine:
     def __init__(self, persist_dir="./chroma_db"):
@@ -143,8 +145,57 @@ class RAGEngine:
 
         yield ("sources", sources)
         yield ("status", "Generating answer...")
+
+        # The model is asked (in the same prompt/call -- no extra request)
+        # to append 3 follow-up questions after FOLLOWUP_MARKER. Tokens
+        # stream in arbitrary-sized chunks, so the marker can land split
+        # across two chunks; keep back only the minimal trailing slice that
+        # could still be the start of the marker, and only release text once
+        # it's provably clear of it.
+        buffer = ""
+        followup_text = ""
+        marker_found = False
         for token in llm_provider.generate_stream(prompt):
-            yield ("token", token)
+            if marker_found:
+                followup_text += token
+                continue
+
+            buffer += token
+            if FOLLOWUP_MARKER in buffer:
+                marker_found = True
+                pre, _, post = buffer.partition(FOLLOWUP_MARKER)
+                if pre:
+                    yield ("token", pre)
+                followup_text = post
+                buffer = ""
+                continue
+
+            safe_len = len(buffer) - (len(FOLLOWUP_MARKER) - 1)
+            if safe_len > 0:
+                yield ("token", buffer[:safe_len])
+                buffer = buffer[safe_len:]
+
+        if not marker_found and buffer:
+            yield ("token", buffer)
+
+        questions = self._parse_followups(followup_text)
+        if questions:
+            yield ("suggestions", questions)
+
+    @staticmethod
+    def _parse_followups(text):
+        """Best-effort parse of the model's follow-up-questions trailer --
+        lenient about numbering/bullet style since smaller models don't
+        always follow the requested "- " format exactly. Returns [] (never
+        raises) if the model omitted the section entirely, so a model that
+        ignores the instruction just yields no suggestions rather than
+        breaking the answer."""
+        questions = []
+        for line in text.strip().splitlines():
+            line = re.sub(r'^[\s\-•*]*(?:\d+[\.\)]\s*)?', '', line.strip()).strip()
+            if line:
+                questions.append(line)
+        return questions[:3]
 
     def _search(self, embedding, n_results, included_filenames=None):
         """Retrieve the top matching chunks for an already-computed embedding."""
@@ -190,7 +241,7 @@ Context:
 
 Question: {question}
 
-Answer (be specific and cite which document if relevant):"""
+Answer (be specific and cite which document if relevant). Then, on a new line, write exactly "{FOLLOWUP_MARKER}" followed by exactly 3 short follow-up questions the user could reasonably ask next about this document, each on its own line starting with "- ". Only ask about things the context above could plausibly answer."""
 
         return sources, prompt
 

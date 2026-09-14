@@ -32,11 +32,13 @@ export interface ChatMessage {
   status?: string
   isStreaming?: boolean
   error?: string
+  suggestions?: string[]
 }
 
 export type NdjsonEvent =
   | { type: 'status'; data: string }
   | { type: 'sources'; data: Source[] }
   | { type: 'token'; data: string }
+  | { type: 'suggestions'; data: string[] }
   | { type: 'error'; data: string }
   | { type: 'done'; data: null }
