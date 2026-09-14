@@ -136,7 +136,11 @@ There's no training step here — embeddings and generation both run on frozen, 
 
 1. New Web Service → connect this repo.
 2. Build command: `pip install -r requirements.txt`
-3. Start command: `python app.py`
+3. Start command:
+   ```
+   gunicorn --workers 1 --threads 4 --timeout 120 --graceful-timeout 30 --max-requests 200 --max-requests-jitter 50 app:app
+   ```
+   Not `python app.py` — that runs Flask's built-in dev server, which explicitly warns against production use. One worker with several threads (not several worker processes) because Render's free tier is only 512MB RAM and each additional worker process would duplicate the ChromaDB connection in memory. `--max-requests` recycles the worker periodically (standard production hardening against any slow resource creep over a long-running process); the jitter staggers it so it doesn't recycle at a perfectly predictable interval.
 4. Environment variables:
    - `LLM_PROVIDER=groq`
    - `GROQ_API_KEY=<your key>` (set as a Render secret, never committed)
