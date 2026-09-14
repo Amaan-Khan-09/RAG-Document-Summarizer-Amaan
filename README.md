@@ -138,9 +138,11 @@ There's no training step here — embeddings and generation both run on frozen, 
 2. Build command: `pip install -r requirements.txt`
 3. Start command:
    ```
-   gunicorn --workers 1 --threads 4 --timeout 120 --graceful-timeout 30 --max-requests 200 --max-requests-jitter 50 app:app
+   gunicorn --workers 1 --threads 4 --timeout 300 --graceful-timeout 30 --max-requests 200 --max-requests-jitter 50 app:app
    ```
    Not `python app.py` — that runs Flask's built-in dev server, which explicitly warns against production use. One worker with several threads (not several worker processes) because Render's free tier is only 512MB RAM and each additional worker process would duplicate the ChromaDB connection in memory. `--max-requests` recycles the worker periodically (standard production hardening against any slow resource creep over a long-running process); the jitter staggers it so it doesn't recycle at a perfectly predictable interval.
+
+   **`--timeout 300` is the important one, raised from 120 after a real failure**: this app's import chain (chromadb + onnxruntime + grpc + two AI SDKs, ~112MB) is heavy enough that under Render free tier's 0.1 CPU, a cold boot can plausibly take well over two minutes. Gunicorn's `--timeout` kills a worker it hasn't heard from within that window and restarts it -- if the import itself takes longer than the timeout, the worker never finishes booting before being killed, and repeats forever without ever successfully starting. Confirmed via a real deploy: a request that got a 502 after 123s (Render's own proxy giving up waiting, not a client-side issue) followed by every subsequent request hanging completely, consistent with an endless kill-and-restart-mid-boot loop against too-short a timeout.
 4. Environment variables:
    - `LLM_PROVIDER=groq`
    - `GROQ_API_KEY=<your key>` (set as a Render secret, never committed)
