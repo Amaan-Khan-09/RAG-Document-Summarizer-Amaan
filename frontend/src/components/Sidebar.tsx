@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { Sparkles, Trash, X } from 'lucide-react'
+import { Trash, X } from 'lucide-react'
 import { AnimatePresence, motion } from 'framer-motion'
 import StatusBadge from './StatusBadge'
 import UploadDropzone from './UploadDropzone'
 import DocumentList from './DocumentList'
 import ThemeToggle from './ThemeToggle'
+import Logo from './Logo'
 import { clearAll } from '../lib/api'
 import type { Theme } from '../hooks/useTheme'
 import type { DocumentInfo, HealthStatus } from '../types'
@@ -47,9 +48,7 @@ function SidebarContent({
   return (
     <div className="flex h-full w-72 shrink-0 flex-col">
       <div className="flex items-center gap-2.5 border-b border-black/5 px-4 py-4 dark:border-white/10">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-lg shadow-indigo-500/20">
-          <Sparkles className="h-4 w-4 text-white" />
-        </div>
+        <Logo size="md" />
         <div className="min-w-0 flex-1">
           <h1 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">RAG Summarizer</h1>
           <StatusBadge health={health} />
