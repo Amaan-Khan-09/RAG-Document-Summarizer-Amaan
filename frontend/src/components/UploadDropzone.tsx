@@ -6,7 +6,14 @@ import type { UploadResult } from '../types'
 
 const ACCEPTED = '.pdf,.docx,.txt'
 
-export default function UploadDropzone({ onUploaded }: { onUploaded: () => void }) {
+export default function UploadDropzone({
+  onUploaded,
+  variant = 'sidebar',
+}: {
+  onUploaded: () => void
+  variant?: 'sidebar' | 'hero'
+}) {
+  const isHero = variant === 'hero'
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [results, setResults] = useState<UploadResult[]>([])
@@ -45,7 +52,9 @@ export default function UploadDropzone({ onUploaded }: { onUploaded: () => void 
           setIsDragging(false)
           handleFiles(e.dataTransfer.files)
         }}
-        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-6 text-center transition-all ${
+        className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed text-center transition-all ${
+          isHero ? 'px-8 py-12 sm:px-14 sm:py-16' : 'px-4 py-6'
+        } ${
           isDragging
             ? 'scale-[1.02] border-violet-400 bg-violet-500/10 shadow-lg shadow-violet-500/10'
             : 'border-black/10 bg-black/[0.02] hover:border-black/20 hover:bg-black/[0.04] dark:border-white/15 dark:bg-white/[0.02] dark:hover:border-white/25 dark:hover:bg-white/[0.04]'
@@ -62,19 +71,22 @@ export default function UploadDropzone({ onUploaded }: { onUploaded: () => void 
         <motion.div
           animate={isDragging ? { y: -3, scale: 1.1 } : { y: 0, scale: 1 }}
           transition={{ type: 'spring', stiffness: 400, damping: 20 }}
+          className={isHero ? 'flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/15 via-violet-500/15 to-fuchsia-500/15' : undefined}
         >
           {isUploading ? (
-            <Loader2 className="h-5 w-5 animate-spin text-violet-500 dark:text-violet-400" />
+            <Loader2 className={`animate-spin text-violet-500 dark:text-violet-400 ${isHero ? 'h-6 w-6' : 'h-5 w-5'}`} />
           ) : (
             <UploadCloud
-              className={`h-5 w-5 ${isDragging ? 'text-violet-500 dark:text-violet-400' : 'text-zinc-400 dark:text-zinc-500'}`}
+              className={`${isDragging ? 'text-violet-500 dark:text-violet-400' : isHero ? 'text-violet-500 dark:text-violet-400' : 'text-zinc-400 dark:text-zinc-500'} ${isHero ? 'h-6 w-6' : 'h-5 w-5'}`}
             />
           )}
         </motion.div>
-        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-          <span className="font-medium text-zinc-800 dark:text-zinc-200">Click to upload</span> or drag files
+        <div className={isHero ? 'mt-1 text-sm text-zinc-600 dark:text-zinc-300' : 'text-xs text-zinc-500 dark:text-zinc-400'}>
+          <span className="font-medium text-zinc-800 dark:text-zinc-100">Click to upload</span> or drag files
         </div>
-        <div className="text-[10px] text-zinc-400 dark:text-zinc-600">PDF, DOCX, or TXT</div>
+        <div className={isHero ? 'text-xs text-zinc-400 dark:text-zinc-500' : 'text-[10px] text-zinc-400 dark:text-zinc-600'}>
+          PDF, DOCX, or TXT
+        </div>
       </label>
 
       {results.length > 0 && (
