@@ -2,11 +2,11 @@
 
 An AI-powered document Q&A and summarization tool built on Retrieval-Augmented Generation. Upload PDFs, DOCX, or text files, then ask questions grounded in their actual content (with source citations) or generate a bullet-point summary.
 
-Runs two ways, switched by one environment variable: **fully local via Ollama** for development (no API key, no cost), or on **Google Gemini** for the deployed version (since the deployed host has no GPU/RAM budget to run models itself).
+Chat/generation and embeddings are independently swappable, controlled by env vars: **fully local via Ollama** for development (no API key, no cost), or **Groq for chat + Gemini for embeddings** in the deployed version. That split exists because Groq — chosen for chat since it's free-tier and extremely fast — has no embeddings API at all; Gemini fills that one gap.
 
 ## Tech Stack
 
-**Backend:** Python, Flask, ChromaDB (vector store), a swappable LLM provider layer — Ollama (`llama3.2` + `nomic-embed-text`) locally, Gemini (`gemini-2.5-flash` + `gemini-embedding-001`) in production
+**Backend:** Python, Flask, ChromaDB (vector store), a swappable provider layer — Ollama (`llama3.2` + `nomic-embed-text`) locally; Groq (`llama-3.3-70b-versatile`) for chat + Gemini (`gemini-embedding-001`) for embeddings in production
 **Frontend:** React, TypeScript, Tailwind CSS v4, Vite
 
 ## Features
@@ -32,11 +32,21 @@ ollama pull nomic-embed-text
 
 Leave `ollama serve` running (most installs run it automatically in the background). No API key needed for local dev.
 
-To run locally against Gemini instead (e.g. to test the same path the deployed version uses), set two environment variables before starting the backend instead of installing Ollama:
+To run locally against the same providers the deployed version uses:
 
 ```bash
-LLM_PROVIDER=gemini
-GEMINI_API_KEY=your-key-here
+LLM_PROVIDER=groq
+GROQ_API_KEY=your-groq-key
+GEMINI_API_KEY=your-gemini-key       # embeddings only -- EMBED_PROVIDER defaults to
+                                      # "gemini" automatically when LLM_PROVIDER=groq
+```
+
+Or mix and match — e.g. Groq for fast chat while still embedding locally with Ollama (no Gemini key needed at all):
+
+```bash
+LLM_PROVIDER=groq
+GROQ_API_KEY=your-groq-key
+EMBED_PROVIDER=ollama
 ```
 
 ### 2. Backend
@@ -113,11 +123,11 @@ There's no training step here — embeddings and generation both run on frozen, 
 
 ## Deployment
 
-**Chosen architecture: frontend on Vercel, backend on Render, Gemini instead of Ollama in production.** Reasoning, not just a preference:
+**Chosen architecture: frontend on Vercel, backend on Render, Groq (chat) + Gemini (embeddings) instead of Ollama in production.** Reasoning, not just a preference:
 
 - Vercel's Python functions are stateless with a read-only filesystem and a 10s execution limit on the free tier — incompatible with this app's local ChromaDB-on-disk persistence and streaming responses. Vercel is used for what it's actually good at: hosting the static React build.
 - The backend needs a real, long-running process (to hold the ChromaDB connection and stream responses), so it goes on Render instead, which supports that on its free tier.
-- Render's free tier has no GPU and limited RAM — not enough to run Ollama's models — so the deployed backend uses `LLM_PROVIDER=gemini` instead. Local development is unaffected; it still defaults to Ollama.
+- Render's free tier has no GPU and limited RAM — not enough to run Ollama's models — so the deployed backend swaps to hosted providers. Groq was picked for chat specifically for its free tier and very fast streaming; it has no embeddings API at all, so Gemini's cheap embedding model (~$0.003 to embed a 19-page paper, per the Validation numbers below) fills that one gap. Local development is unaffected; it still defaults to Ollama for both.
 
 ### Backend (Render)
 
@@ -125,8 +135,9 @@ There's no training step here — embeddings and generation both run on frozen, 
 2. Build command: `pip install -r requirements.txt`
 3. Start command: `python app.py`
 4. Environment variables:
-   - `LLM_PROVIDER=gemini`
-   - `GEMINI_API_KEY=<your key>` (set as a Render secret, never committed)
+   - `LLM_PROVIDER=groq`
+   - `GROQ_API_KEY=<your key>` (set as a Render secret, never committed)
+   - `GEMINI_API_KEY=<your key>` (embeddings only — `EMBED_PROVIDER` defaults to `gemini` automatically when `LLM_PROVIDER=groq`)
    - `ALLOWED_ORIGIN=<your Vercel URL>` (once you have it, so CORS only allows your actual frontend)
    - `APP_SECRET=<any random string you generate>` — see Cost & abuse protection below
 5. Render provides a public URL like `https://your-app.onrender.com` — the API is at `https://your-app.onrender.com/api/...`.
@@ -142,12 +153,12 @@ There's no training step here — embeddings and generation both run on frozen, 
 
 ### Cost & abuse protection
 
-Once `LLM_PROVIDER=gemini` is set, every upload/question/summary spends real (paid) API quota — and the Render URL is public, so anyone who finds it could hit the API directly with curl/Postman regardless of what the frontend does. CORS doesn't stop that; CORS is a browser-only mechanism. Two layers guard against it:
+Once `LLM_PROVIDER=groq` is set, every upload spends Gemini embedding quota and every question/summary spends Groq quota — and the Render URL is public, so anyone who finds it could hit the API directly with curl/Postman regardless of what the frontend does. CORS doesn't stop that; CORS is a browser-only mechanism. Two layers guard against it:
 
 - **`APP_SECRET`** — `/api/upload`, `/api/query`, `/api/summarize`, `/api/clear`, and single-document delete all require an `X-App-Secret` header matching this value (skipped entirely if the env var isn't set, so local dev stays frictionless). Worth being honest about what this actually is: once the frontend is built, `VITE_APP_SECRET` ships inside the public JS bundle — anyone who opens devtools on the deployed site can read it out. It's not a real secret against a determined person; its actual job is filtering out automated scanners and casual poking at the bare backend URL that never load the frontend at all.
 - **Rate limiting** (`flask-limiter`) — 10 uploads/hour and 20 questions-or-summaries/hour per IP, regardless of whether the secret is known. This is the real backstop: even if `APP_SECRET` leaks, damage is capped.
 
-For a hard ceiling beyond both of these, set a budget alert (or a hard cap) on the Gemini API key itself in Google Cloud Console — that's the one guarantee that isn't dependent on this app's code being correct.
+For a hard ceiling beyond both of these, set a budget alert (or a hard cap) on both keys directly — Groq's console and Google Cloud Console for Gemini — that's the one guarantee that isn't dependent on this app's code being correct.
 
 ### Known limitation of this split
 
