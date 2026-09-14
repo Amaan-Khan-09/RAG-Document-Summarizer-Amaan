@@ -3,8 +3,8 @@ import { motion } from 'framer-motion'
 import Logo from './Logo'
 
 const STAGES = ['Embed', 'Retrieve', 'Generate']
-const PROGRESS_MS = 1500
-const EXIT_DELAY_MS = 350
+const PROGRESS_MS = 7500
+const EXIT_DELAY_MS = 500
 
 export default function IntroLoader({ onDone }: { onDone: () => void }) {
   const [stage, setStage] = useState(0)
@@ -25,7 +25,7 @@ export default function IntroLoader({ onDone }: { onDone: () => void }) {
       initial={{ opacity: 1 }}
       exit={{ opacity: 0, scale: 1.03 }}
       transition={{ duration: 0.45, ease: 'easeOut' }}
-      className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#08070d]"
+      className="fixed inset-0 z-50 grid place-items-center overflow-hidden bg-[#eeedf5] dark:bg-[#08070d]"
     >
       <div className="intro-grid" aria-hidden="true" />
 
@@ -42,12 +42,12 @@ export default function IntroLoader({ onDone }: { onDone: () => void }) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.15, duration: 0.4 }}
-          className="mt-5 font-mono text-xs font-semibold uppercase tracking-wider text-violet-400"
+          className="mt-5 font-mono text-xs font-semibold uppercase tracking-wider text-violet-600 dark:text-violet-400"
         >
           RAG Summarizer · 2026
         </motion.p>
 
-        <h1 className="mt-3 flex flex-col text-4xl font-bold leading-[0.95] text-zinc-100 sm:text-5xl">
+        <h1 className="mt-3 flex flex-col text-4xl font-bold leading-[0.95] text-zinc-900 dark:text-zinc-100 sm:text-5xl">
           <motion.span
             initial={{ opacity: 0, y: 24, filter: 'blur(8px)' }}
             animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
@@ -69,12 +69,12 @@ export default function IntroLoader({ onDone }: { onDone: () => void }) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ delay: 0.4, duration: 0.4 }}
-          className="mt-4 text-sm font-medium text-zinc-500"
+          className="mt-4 text-sm font-medium text-zinc-500 dark:text-zinc-400"
         >
           Embed · Retrieve · Generate
         </motion.p>
 
-        <div className="mt-6 h-1 w-full overflow-hidden rounded-full bg-white/10">
+        <div className="mt-6 h-1 w-full overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
           <motion.div
             initial={{ width: 0 }}
             animate={{ width: '100%' }}
@@ -83,9 +83,9 @@ export default function IntroLoader({ onDone }: { onDone: () => void }) {
           />
         </div>
 
-        <div className="mt-3 flex w-full justify-between font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-600">
+        <div className="mt-3 flex w-full justify-between font-mono text-[10px] font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-600">
           {STAGES.map((label, i) => (
-            <span key={label} className={i === stage ? 'text-violet-400' : undefined}>
+            <span key={label} className={i === stage ? 'text-violet-600 dark:text-violet-400' : undefined}>
               {label}
             </span>
           ))}

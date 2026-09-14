@@ -14,7 +14,7 @@ import { useIsMobile } from './hooks/useIsMobile'
 import { getDocuments, getHealth } from './lib/api'
 import type { DocumentInfo, HealthStatus } from './types'
 
-const HEALTH_POLL_MS = 15_000
+const HEALTH_POLL_MS = 45_000
 const INTRO_KEY = 'rag-summarizer-intro-shown'
 
 function getIntroAlreadyShown() {
@@ -68,14 +68,14 @@ function App() {
 
   const hasDocuments = documents.length > 0
 
-  function handleIntroDone() {
+  const handleIntroDone = useCallback(() => {
     try {
       sessionStorage.setItem(INTRO_KEY, '1')
     } catch {
       // ignore -- intro just replays next load, harmless
     }
     setShowIntro(false)
-  }
+  }, [])
 
   return (
     <div className="relative flex h-screen overflow-hidden text-zinc-900 dark:text-zinc-100">

@@ -140,6 +140,16 @@ def upload_files():
                 "status": "failed",
                 "error": str(e),
             })
+        finally:
+            # The raw file's text is already extracted, chunked, and
+            # embedded into the vector store at this point -- nothing reads
+            # it again after this. Leaving it in place would otherwise grow
+            # ./uploads/ without bound on Render's ephemeral disk over
+            # repeated uploads across the app's lifetime.
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
 
     return jsonify({"results": results}), 200
 
