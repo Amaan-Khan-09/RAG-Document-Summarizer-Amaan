@@ -15,15 +15,6 @@ import { getDocuments, getHealth } from './lib/api'
 import type { DocumentInfo, HealthStatus } from './types'
 
 const HEALTH_POLL_MS = 45_000
-const INTRO_KEY = 'rag-summarizer-intro-shown'
-
-function getIntroAlreadyShown() {
-  try {
-    return sessionStorage.getItem(INTRO_KEY) === '1'
-  } catch {
-    return false
-  }
-}
 
 function App() {
   const { theme, toggleTheme } = useTheme()
@@ -31,7 +22,7 @@ function App() {
   const [health, setHealth] = useState<HealthStatus | null>(null)
   const [documents, setDocuments] = useState<DocumentInfo[]>([])
   const [ready, setReady] = useState(false)
-  const [showIntro, setShowIntro] = useState(() => !getIntroAlreadyShown())
+  const [showIntro, setShowIntro] = useState(true)
   const [excludedFilenames, setExcludedFilenames] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState<Tab>('chat')
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -69,11 +60,6 @@ function App() {
   const hasDocuments = documents.length > 0
 
   const handleIntroDone = useCallback(() => {
-    try {
-      sessionStorage.setItem(INTRO_KEY, '1')
-    } catch {
-      // ignore -- intro just replays next load, harmless
-    }
     setShowIntro(false)
   }, [])
 
