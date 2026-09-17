@@ -58,8 +58,10 @@ class RAGEngine:
 
         return chunks
 
-    def add_document(self, filepath, filename):
-        """Process and add document to vector database.
+    def add_document(self, filepath, filename, session_id):
+        """Process and add document to vector database, scoped to session_id
+        so one visitor's uploads are never visible to another (see
+        _scoped_where's docstring).
 
         Raises ValueError if the file has no extractable text (e.g. a
         scanned/image-only PDF) so the caller can report a clear error
@@ -74,13 +76,16 @@ class RAGEngine:
             )
 
         chunks = self.chunk_text(text)
-        doc_id = hashlib.md5(filename.encode()).hexdigest()
+        # ids are namespaced by session so the same filename uploaded by two
+        # different sessions never collides in the shared store.
+        doc_id = hashlib.md5(f"{session_id}:{filename}".encode()).hexdigest()
 
         # Re-uploading a file with the same name previously crashed / silently
         # no-opped because collection.add() rejects ids that already exist.
-        # Clear out any prior chunks for this filename first so re-uploads are
-        # idempotent (upsert semantics at the document level).
-        self.collection.delete(where={"filename": filename})
+        # Clear out any prior chunks for this filename (within this session
+        # only) first so re-uploads are idempotent (upsert semantics at the
+        # document level).
+        self.collection.delete(where=self._scoped_where(session_id, filename=filename))
 
         # Dispatched concurrently on the client side. Measured on Ollama with
         # an 87-chunk PDF: this made ~no difference (34.5s vs 35.8s
@@ -96,7 +101,10 @@ class RAGEngine:
 
         ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
         documents = chunks
-        metadatas = [{"filename": filename, "chunk_index": i} for i in range(len(chunks))]
+        metadatas = [
+            {"filename": filename, "chunk_index": i, "session_id": session_id}
+            for i in range(len(chunks))
+        ]
 
         if ids:
             self.collection.upsert(
@@ -108,27 +116,29 @@ class RAGEngine:
 
         return len(chunks)
 
-    def query(self, question, n_results=5, included_filenames=None):
+    def query(self, question, session_id, n_results=5, included_filenames=None):
         """Query the vector database (non-streaming)."""
         if included_filenames is not None and not included_filenames:
             return None, []
 
         embedding = llm_provider.embed(question, task_type="RETRIEVAL_QUERY")
-        results = self._search(embedding, n_results, included_filenames)
+        results = self._search(embedding, n_results, session_id, included_filenames)
         sources, prompt = self._sources_and_prompt(question, results)
         if prompt is None:
             return None, []
 
         return llm_provider.generate(prompt), sources
 
-    def query_stream(self, question, n_results=5, included_filenames=None):
+    def query_stream(self, question, session_id, n_results=5, included_filenames=None):
         """Query the vector database, yielding progress as it happens. Yields
         ("status", str) immediately before each real retrieval stage runs
         (not simulated -- these are the actual steps, in the actual order),
         then ("sources", list[dict]) once retrieval completes, then
         ("token", str) for each generated piece. Each source dict is
         {filename, snippet, similarity} so the UI can show *what* was
-        actually retrieved, not just claim a filename was relevant."""
+        actually retrieved, not just claim a filename was relevant.
+
+        Retrieval is always scoped to session_id (see _scoped_where)."""
         if included_filenames is not None and not included_filenames:
             yield ("error", "No documents selected. Include at least one document to search.")
             return
@@ -137,7 +147,7 @@ class RAGEngine:
         embedding = llm_provider.embed(question, task_type="RETRIEVAL_QUERY")
 
         yield ("status", "Searching indexed documents...")
-        results = self._search(embedding, n_results, included_filenames)
+        results = self._search(embedding, n_results, session_id, included_filenames)
         sources, prompt = self._sources_and_prompt(question, results)
         if prompt is None:
             yield ("error", "No documents found. Please upload documents first.")
@@ -197,15 +207,31 @@ class RAGEngine:
                 questions.append(line)
         return questions[:3]
 
-    def _search(self, embedding, n_results, included_filenames=None):
-        """Retrieve the top matching chunks for an already-computed embedding."""
-        where = {"filename": {"$in": included_filenames}} if included_filenames else None
+    def _search(self, embedding, n_results, session_id, included_filenames=None):
+        """Retrieve the top matching chunks for an already-computed embedding,
+        scoped to session_id."""
+        where = self._scoped_where(
+            session_id,
+            filename={"$in": included_filenames} if included_filenames else None,
+        )
         return self.collection.query(
             query_embeddings=[embedding],
             n_results=n_results,
             include=["documents", "metadatas", "distances"],
             where=where,
         )
+
+    @staticmethod
+    def _scoped_where(session_id, **extra):
+        """Build a `where` filter that always restricts to session_id, plus
+        any other equality/$in conditions -- the one chokepoint every read
+        and delete in this file goes through, so one visitor's documents can
+        never be listed, searched, or deleted by another visitor's session."""
+        where = {"session_id": session_id}
+        for key, value in extra.items():
+            if value is not None:
+                where[key] = value
+        return where
 
     def _sources_and_prompt(self, question, results):
         if not results['documents'][0]:
@@ -245,17 +271,17 @@ Answer (be specific and cite which document if relevant). Then, on a new line, w
 
         return sources, prompt
 
-    def summarize(self, filename=None):
+    def summarize(self, session_id, filename=None):
         """Generate summary of documents (non-streaming)."""
-        prompt = self._build_summary_prompt(filename)
+        prompt = self._build_summary_prompt(session_id, filename)
         if prompt is None:
             return "No documents found."
 
         return llm_provider.generate(prompt)
 
-    def summarize_stream(self, filename=None):
+    def summarize_stream(self, session_id, filename=None):
         """Generate summary of documents, yielding tokens as they arrive."""
-        prompt = self._build_summary_prompt(filename)
+        prompt = self._build_summary_prompt(session_id, filename)
         if prompt is None:
             yield ("error", "No documents found.")
             return
@@ -263,11 +289,8 @@ Answer (be specific and cite which document if relevant). Then, on a new line, w
         for token in llm_provider.generate_stream(prompt):
             yield ("token", token)
 
-    def _build_summary_prompt(self, filename=None):
-        if filename:
-            results = self.collection.get(where={"filename": filename})
-        else:
-            results = self.collection.get()
+    def _build_summary_prompt(self, session_id, filename=None):
+        results = self.collection.get(where=self._scoped_where(session_id, filename=filename))
 
         if not results['documents']:
             return None
@@ -281,9 +304,10 @@ Answer (be specific and cite which document if relevant). Then, on a new line, w
 
 Summary:"""
 
-    def list_documents(self):
-        """List distinct uploaded documents with their chunk counts."""
-        results = self.collection.get()
+    def list_documents(self, session_id):
+        """List distinct uploaded documents (within this session only) with
+        their chunk counts."""
+        results = self.collection.get(where=self._scoped_where(session_id))
         counts = {}
         for meta in results.get('metadatas', []) or []:
             filename = meta.get('filename', 'unknown')
@@ -293,22 +317,24 @@ Summary:"""
             for filename, count in sorted(counts.items())
         ]
 
-    def delete_document(self, filename):
-        """Delete all chunks belonging to a single document."""
-        existing = self.collection.get(where={"filename": filename})
+    def delete_document(self, filename, session_id):
+        """Delete all chunks belonging to a single document in this session."""
+        where = self._scoped_where(session_id, filename=filename)
+        existing = self.collection.get(where=where)
         if not existing.get('ids'):
             return False
-        self.collection.delete(where={"filename": filename})
+        self.collection.delete(where=where)
         return True
 
-    def get_stats(self):
-        """Get database statistics"""
-        count = self.collection.count()
-        doc_count = len(self.list_documents())
-        return {"total_chunks": count, "total_documents": doc_count}
+    def get_stats(self, session_id):
+        """Get database statistics, scoped to this session."""
+        results = self.collection.get(where=self._scoped_where(session_id))
+        total_chunks = len(results.get('ids', []))
+        total_documents = len(self.list_documents(session_id))
+        return {"total_chunks": total_chunks, "total_documents": total_documents}
 
-    def clear_all(self):
-        """Delete every chunk from the collection."""
-        existing_ids = self.collection.get().get('ids', [])
+    def clear_all(self, session_id):
+        """Delete every chunk belonging to this session."""
+        existing_ids = self.collection.get(where=self._scoped_where(session_id)).get('ids', [])
         if existing_ids:
             self.collection.delete(ids=existing_ids)

@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 # env vars at import time, so .env has to already be loaded by then.
 load_dotenv()
 
-from flask import Flask, request, jsonify, Response, send_from_directory
+from flask import Flask, g, request, jsonify, Response, send_from_directory
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -54,6 +54,26 @@ def require_app_secret(fn):
     return wrapped
 
 
+# Every visitor's browser generates its own random id (see frontend
+# src/lib/session.ts) and sends it on every request. The vector store is a
+# single shared process-wide collection -- without this, one visitor's
+# uploaded documents (and their contents, via query/summarize) would be
+# readable by every other visitor hitting the same deployment, since nothing
+# else partitions the data between browsers/devices.
+SESSION_HEADER = "X-Session-Id"
+
+
+def require_session_id(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        session_id = request.headers.get(SESSION_HEADER)
+        if not session_id:
+            return jsonify({"error": f"Missing {SESSION_HEADER} header"}), 400
+        g.session_id = session_id
+        return fn(*args, **kwargs)
+    return wrapped
+
+
 UPLOAD_FOLDER = './uploads'
 ALLOWED_EXTENSIONS = {'pdf', 'docx', 'txt'}
 
@@ -82,11 +102,14 @@ def ndjson_stream(events):
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    """Health check: reports API status, LLM provider reachability, and doc count."""
+    """Health check: reports API status, LLM provider reachability, and doc
+    count for the requesting session (or 0 if the client is old enough not
+    to send a session id yet)."""
     provider_ok = llm_provider.health_check()
 
+    session_id = request.headers.get(SESSION_HEADER)
     try:
-        stats = rag.get_stats()
+        stats = rag.get_stats(session_id) if session_id else {"total_chunks": 0, "total_documents": 0}
     except Exception:
         stats = {"total_chunks": 0, "total_documents": 0}
 
@@ -100,6 +123,7 @@ def health():
 
 @app.route('/api/upload', methods=['POST'])
 @require_app_secret
+@require_session_id
 @limiter.limit("10 per hour")
 def upload_files():
     """Upload and process documents."""
@@ -128,7 +152,7 @@ def upload_files():
         file.save(filepath)
 
         try:
-            chunks = rag.add_document(filepath, filename)
+            chunks = rag.add_document(filepath, filename, g.session_id)
             results.append({
                 "filename": filename,
                 "status": "success",
@@ -155,20 +179,22 @@ def upload_files():
 
 
 @app.route('/api/documents', methods=['GET'])
+@require_session_id
 def list_documents():
-    """List every uploaded document with its chunk count."""
+    """List every document uploaded by this session, with its chunk count."""
     try:
-        return jsonify({"documents": rag.list_documents()}), 200
+        return jsonify({"documents": rag.list_documents(g.session_id)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
 
 @app.route('/api/documents/<path:filename>', methods=['DELETE'])
 @require_app_secret
+@require_session_id
 def delete_document(filename):
-    """Delete a single document (and all its chunks)."""
+    """Delete a single document (and all its chunks) from this session."""
     try:
-        found = rag.delete_document(filename)
+        found = rag.delete_document(filename, g.session_id)
         if not found:
             return jsonify({"error": f"'{filename}' not found"}), 404
         return jsonify({"message": f"Deleted '{filename}'"}), 200
@@ -178,6 +204,7 @@ def delete_document(filename):
 
 @app.route('/api/query', methods=['POST'])
 @require_app_secret
+@require_session_id
 @limiter.limit("20 per hour")
 def query():
     """Ask a question, streamed as newline-delimited JSON."""
@@ -192,25 +219,27 @@ def query():
     # excluded via the source-filter checkboxes, and must search nothing --
     # `... or None` would silently discard it and search everything instead.
     included_filenames = data.get('included_filenames')
-    return ndjson_stream(rag.query_stream(question, n_results, included_filenames))
+    return ndjson_stream(rag.query_stream(question, g.session_id, n_results, included_filenames))
 
 
 @app.route('/api/summarize', methods=['POST'])
 @require_app_secret
+@require_session_id
 @limiter.limit("20 per hour")
 def summarize():
-    """Summarize one document (or all documents), streamed as NDJSON."""
+    """Summarize one document (or all documents) from this session, streamed as NDJSON."""
     data = request.get_json(silent=True) or {}
     filename = data.get('filename')
-    return ndjson_stream(rag.summarize_stream(filename))
+    return ndjson_stream(rag.summarize_stream(g.session_id, filename))
 
 
 @app.route('/api/clear', methods=['DELETE'])
 @require_app_secret
+@require_session_id
 def clear():
-    """Clear all documents from the database."""
+    """Clear all of this session's documents from the database."""
     try:
-        rag.clear_all()
+        rag.clear_all(g.session_id)
         return jsonify({"message": "All documents cleared"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500

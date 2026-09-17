@@ -1,3 +1,4 @@
+import { getSessionId } from './session'
 import type { DocumentInfo, HealthStatus, NdjsonEvent, UploadResult } from '../types'
 
 // Local dev / single-host deploy: relative '/api', proxied by Vite or served
@@ -14,8 +15,13 @@ const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api'
 // limit on the backend is the real cost backstop, not this header.
 const APP_SECRET = import.meta.env.VITE_APP_SECRET
 
+// Sent on every request so the backend can partition documents per
+// browser/device -- without it, every visitor to this deployment would see
+// (and query) every other visitor's uploaded documents. See app.py's
+// require_session_id.
 function authHeaders(extra: Record<string, string> = {}): Record<string, string> {
-  return APP_SECRET ? { ...extra, 'X-App-Secret': APP_SECRET } : extra
+  const headers = { ...extra, 'X-Session-Id': getSessionId() }
+  return APP_SECRET ? { ...headers, 'X-App-Secret': APP_SECRET } : headers
 }
 
 async function json<T>(res: Response): Promise<T> {
@@ -27,12 +33,12 @@ async function json<T>(res: Response): Promise<T> {
 }
 
 export async function getHealth(): Promise<HealthStatus> {
-  const res = await fetch(`${API_BASE}/health`)
+  const res = await fetch(`${API_BASE}/health`, { headers: authHeaders() })
   return json<HealthStatus>(res)
 }
 
 export async function getDocuments(): Promise<DocumentInfo[]> {
-  const res = await fetch(`${API_BASE}/documents`)
+  const res = await fetch(`${API_BASE}/documents`, { headers: authHeaders() })
   const data = await json<{ documents: DocumentInfo[] }>(res)
   return data.documents
 }
