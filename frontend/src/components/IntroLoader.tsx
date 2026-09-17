@@ -3,8 +3,8 @@ import { motion } from 'framer-motion'
 import Logo from './Logo'
 
 const STAGES = ['Embed', 'Retrieve', 'Generate']
-const PROGRESS_MS = 7500
-const EXIT_DELAY_MS = 500
+const PROGRESS_MS = 5200
+const EXIT_DELAY_MS = 350
 
 export default function IntroLoader({ onDone }: { onDone: () => void }) {
   const [stage, setStage] = useState(0)
